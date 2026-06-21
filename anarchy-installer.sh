@@ -152,7 +152,7 @@ pick_keymap() {
   [[ -n "$KEYMAP" ]] || die "No keymap selected."
   log_ok "Console keymap: ${BOLD}$KEYMAP${RESET}"
 
-  log_info "Select the X11/Wayland layout (for informational display only, configure in Hyprland later)."
+  log_info "Select the X11/Wayland layout (configure in Hyprland later)."
   echo ""
 
   local x11_layouts
@@ -251,8 +251,12 @@ partition_disk() {
   local disk="$1" swap_size="$2"
   log_step "Partitioning $disk"
 
-  wipefs -af  "$disk" &>/dev/null
-  sgdisk --zap-all "$disk" &>/dev/null
+  # ── Ensure disk isn't locked by live environment ──
+  swapoff -a
+  umount -qR /mnt 2>/dev/null || true
+
+  wipefs -af  "$disk" >/dev/null
+  sgdisk --zap-all "$disk" >/dev/null
 
   sgdisk -n1:0:+512M  -t1:ef00 -c1:"EFI System"  "$disk"
   if [[ "$swap_size" -gt 0 ]]; then
@@ -281,22 +285,22 @@ format_partitions() {
   local layout="$1"
   log_step "Formatting Partitions ($layout)"
 
-  mkfs.fat -F32 -n "EFI" "$EFI_PART" &>/dev/null
+  mkfs.fat -F32 -n "EFI" "$EFI_PART" >/dev/null
   log_ok "EFI  → FAT32  ($EFI_PART)"
 
   if [[ -n "$SWAP_PART" ]]; then
-    mkswap -L "swap" "$SWAP_PART" &>/dev/null
+    mkswap -L "swap" "$SWAP_PART" >/dev/null
     swapon "$SWAP_PART"
     log_ok "Swap → active ($SWAP_PART)"
   fi
 
   if [[ "$layout" == "btrfs" ]]; then
-    mkfs.btrfs -f -L "archroot" "$ROOT_PART" &>/dev/null
+    mkfs.btrfs -f -L "archroot" "$ROOT_PART" >/dev/null
     mount "$ROOT_PART" /mnt
-    btrfs subvolume create /mnt/@          &>/dev/null
-    btrfs subvolume create /mnt/@home      &>/dev/null
-    btrfs subvolume create /mnt/@snapshots &>/dev/null
-    btrfs subvolume create /mnt/@var_log   &>/dev/null
+    btrfs subvolume create /mnt/@          >/dev/null
+    btrfs subvolume create /mnt/@home      >/dev/null
+    btrfs subvolume create /mnt/@snapshots >/dev/null
+    btrfs subvolume create /mnt/@var_log   >/dev/null
     umount /mnt
     local o="noatime,compress=zstd,space_cache=v2,subvol"
     mount -o "${o}=@"          "$ROOT_PART" /mnt
@@ -306,7 +310,7 @@ format_partitions() {
     mount -o "${o}=@var_log"   "$ROOT_PART" /mnt/var/log
     log_ok "Root → btrfs with subvolumes  (@  @home  @snapshots  @var_log)"
   else
-    mkfs.ext4 -F -L "archroot" "$ROOT_PART" &>/dev/null
+    mkfs.ext4 -F -L "archroot" "$ROOT_PART" >/dev/null
     mount "$ROOT_PART" /mnt
     mkdir -p /mnt/{home,boot/efi}
     log_ok "Root → ext4  ($ROOT_PART)"
@@ -505,18 +509,14 @@ $(gum style --foreground 81 '  ────────────────�
   esac
 
   # Hyprland via UWSM:
-  #   - hyprland          : the compositor
-  #   - uwsm              : universal Wayland session manager (wraps Hyprland)
-  #   - xdg-desktop-portal-hyprland : screenshare / portal
-  #   - sddm              : display manager (launches via uwsm start)
   HYPR_PKGS=(
     hyprland
     uwsm
     xdg-desktop-portal-hyprland
     xdg-desktop-portal-gtk
     sddm qt6-wayland qt5-wayland
-    grim slurp                        # screenshots
-    wl-clipboard cliphist             # clipboard
+    grim slurp                        
+    wl-clipboard cliphist             
     polkit-gnome gnome-keyring libsecret
     pavucontrol pamixer brightnessctl
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd
@@ -626,8 +626,6 @@ systemctl enable sddm
 [[ "${GPU}" == "vm" ]] && systemctl enable vmtoolsd 2>/dev/null || true
 
 # ── SDDM — launch Hyprland through UWSM ─────────────────────────────────────
-# UWSM provides the wayland-sessions .desktop entry for Hyprland.
-# SDDM picks it up automatically from /usr/share/wayland-sessions/.
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/default.conf << SEOF
 [General]
