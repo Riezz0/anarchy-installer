@@ -255,6 +255,17 @@ partition_disk() {
   swapoff -a
   umount -qR /mnt 2>/dev/null || true
 
+  # ── Unmount any mounted partitions on the target disk ──
+  local mounted_parts
+  mounted_parts=$(lsblk -lnpo NAME,MOUNTPOINT "$disk" 2>/dev/null \
+    | awk '$2 != "" && $2 != "/" {print $1}')
+  if [[ -n "$mounted_parts" ]]; then
+    log_warn "Unmounting partitions on $disk…"
+    echo "$mounted_parts" | while read -r part; do
+      umount "$part" 2>/dev/null && log_ok "Unmounted $part" || true
+    done
+  fi
+
   wipefs -af  "$disk" >/dev/null
   sgdisk --zap-all "$disk" >/dev/null
 
