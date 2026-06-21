@@ -2,7 +2,6 @@
 # =============================================================================
 #  ArchHypr Installer
 #  Arch Linux + Hyprland (UWSM) + SDDM — Interactive gum-powered installer
-#  Hyprland config is written in Lua (hyprland.lua)
 # =============================================================================
 
 set -euo pipefail
@@ -48,7 +47,7 @@ EOF
     --align center --width 72 --margin "0 2" --padding "1 4" \
     "Arch Linux  ·  Hyprland (UWSM)  ·  SDDM" \
     "" \
-    "Interactive installer powered by gum  —  Lua-based Hyprland config"
+    "Interactive installer powered by gum"
   echo ""
 }
 
@@ -138,7 +137,7 @@ pick_locale() {
 
 pick_keymap() {
   log_step "Console & Keyboard Layout"
-  log_info "Sets TTY keymap and Hyprland kb_layout."
+  log_info "Sets TTY keymap."
   echo ""
 
   local keymaps
@@ -153,7 +152,7 @@ pick_keymap() {
   [[ -n "$KEYMAP" ]] || die "No keymap selected."
   log_ok "Console keymap: ${BOLD}$KEYMAP${RESET}"
 
-  log_info "Select the X11/Wayland layout for Hyprland (usually the same)."
+  log_info "Select the X11/Wayland layout (for informational display only, configure in Hyprland later)."
   echo ""
 
   local x11_layouts
@@ -163,7 +162,7 @@ pick_keymap() {
   X11_LAYOUT=$(echo "$x11_layouts" \
     | gum filter --placeholder "e.g. us, gb, de, za…" \
                  --prompt "  Hyprland layout › " --height 16 \
-                 --header "  ② Select X11/Wayland layout (Hyprland kb_layout):")
+                 --header "  ② Select X11/Wayland layout:")
   [[ -n "$X11_LAYOUT" ]] || X11_LAYOUT="$KEYMAP"
   log_ok "X11 layout: ${BOLD}$X11_LAYOUT${RESET}"
 
@@ -204,6 +203,38 @@ pick_kernel() {
   KERNEL=$(echo "$choice" | awk '{print $1}')
   KERNEL_HEADERS="${KERNEL}-headers"
   log_ok "Kernel: ${BOLD}$KERNEL${RESET}"
+}
+
+pick_cpu() {
+  log_step "CPU Microcode"
+  log_info "Select the microcode driver for your processor."
+  echo ""
+
+  local choice
+  choice=$(gum choose \
+    --header "  Select CPU microcode:" \
+    "amd-ucode   — for AMD processors" \
+    "intel-ucode — for Intel processors" \
+    "none        — for Virtual Machines / unsupported")
+
+  CPU_UCODE=$(echo "$choice" | awk '{print $1}')
+  [[ "$CPU_UCODE" == "none" ]] && CPU_UCODE=""
+  log_ok "Microcode: ${BOLD}${CPU_UCODE:-none}${RESET}"
+}
+
+pick_audio() {
+  log_step "Audio Backend"
+  log_info "Select your preferred audio server."
+  echo ""
+
+  local choice
+  choice=$(gum choose \
+    --header "  Select Audio Server:" \
+    "pipewire   — modern standard, excellent Wayland support" \
+    "pulseaudio — classic, widely supported")
+
+  AUDIO=$(echo "$choice" | awk '{print $1}')
+  log_ok "Audio: ${BOLD}$AUDIO${RESET}"
 }
 
 # ─── Disk helpers ────────────────────────────────────────────────────────────
@@ -298,11 +329,13 @@ All data on the chosen disk will be DESTROYED. Continue?" \
 
   check_internet
 
-  # ── Regional ───────────────────────────────────────────────────────────────
+  # ── Regional & Hardware ────────────────────────────────────────────────────
   pick_timezone
   pick_locale
   pick_keymap
   pick_kernel
+  pick_cpu
+  pick_audio
 
   # ── Identity ───────────────────────────────────────────────────────────────
   log_step "System Identity"
@@ -419,6 +452,8 @@ $(gum style --foreground 81 '  ────────────────�
   Filesystem    : $FS
   Swap          : ${SWAP_SIZE}GiB
   Bootloader    : $BOOTLOADER
+  CPU uCode     : ${CPU_UCODE:-none}
+  Audio         : $AUDIO
   GPU           : $GPU"
   echo ""
 
@@ -455,6 +490,12 @@ $(gum style --foreground 81 '  ────────────────�
     reflector
   )
   [[ "$FS" == "btrfs" ]] && BASE_PKGS+=(btrfs-progs)
+  [[ -n "$CPU_UCODE" ]] && BASE_PKGS+=("$CPU_UCODE")
+
+  case "$AUDIO" in
+    pipewire)   AUDIO_PKGS=(pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber) ;;
+    pulseaudio) AUDIO_PKGS=(pulseaudio pulseaudio-alsa pulseaudio-bluetooth) ;;
+  esac
 
   case "$GPU" in
     amd)    GPU_PKGS=(mesa vulkan-radeon libva-mesa-driver mesa-vdpau xf86-video-amdgpu) ;;
@@ -477,7 +518,6 @@ $(gum style --foreground 81 '  ────────────────�
     grim slurp                        # screenshots
     wl-clipboard cliphist             # clipboard
     polkit-gnome gnome-keyring libsecret
-    pipewire pipewire-alsa pipewire-pulse pipewire-jack wireplumber
     pavucontrol pamixer brightnessctl
     noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd
     thunar gvfs tumbler ffmpegthumbnailer
@@ -496,11 +536,11 @@ $(gum style --foreground 81 '  ────────────────�
     EXTRA_ARR+=("${words[@]}")
   done <<< "$EXTRA_PKGS"
 
-  ALL_PKGS=("${BASE_PKGS[@]}" "${GPU_PKGS[@]}" "${HYPR_PKGS[@]}" "${BL_PKGS[@]}" "${EXTRA_ARR[@]}")
+  ALL_PKGS=("${BASE_PKGS[@]}" "${GPU_PKGS[@]}" "${AUDIO_PKGS[@]}" "${HYPR_PKGS[@]}" "${BL_PKGS[@]}" "${EXTRA_ARR[@]}")
   readarray -t ALL_PKGS < <(printf '%s\n' "${ALL_PKGS[@]}" | sort -u)
 
-  run_spin "pacstrap — this can take several minutes…" \
-    pacstrap -K /mnt "${ALL_PKGS[@]}"
+  echo -e "${CYAN}Running pacstrap — this can take several minutes…${RESET}"
+  pacstrap -K /mnt "${ALL_PKGS[@]}"
   log_ok "Base system installed."
 
   log_step "Generating fstab"
@@ -509,10 +549,6 @@ $(gum style --foreground 81 '  ────────────────�
 
   # ── Build chroot script ────────────────────────────────────────────────────
   log_step "Configuring Installed System (chroot)"
-
-  # Lua variant line — only emit if variant is set
-  VARIANT_LUA=""
-  [[ -n "$X11_VARIANT" ]] && VARIANT_LUA="  kb_variant = \"${X11_VARIANT}\","
 
   cat > /mnt/tmp/arch-chroot-setup.sh << CHROOT_EOF
 #!/usr/bin/env bash
@@ -603,253 +639,6 @@ SessionDir=/usr/share/wayland-sessions
 CompositorCommand=uwsm start hyprland-uwsm.desktop
 SEOF
 
-# uwsm also needs to know the user seat; let it auto-detect via PAM/logind.
-# The hyprland-uwsm.desktop that ships with uwsm calls:
-#   uwsm start -- Hyprland
-# which sets up a proper systemd user session with correct env propagation.
-
-# ── Hyprland Lua config ──────────────────────────────────────────────────────
-# Hyprland supports a native Lua config via hyprland.lua when placed next to
-# (or instead of) hyprland.conf. The file is loaded automatically when Hyprland
-# finds ~/.config/hypr/hyprland.lua and no hyprland.conf exists beside it.
-# We do NOT create hyprland.conf so Hyprland falls through to the Lua file.
-mkdir -p /home/${USERNAME}/.config/hypr
-
-cat > /home/${USERNAME}/.config/hypr/hyprland.lua << 'LUAEOF'
--- =============================================================================
---  hyprland.lua  —  ArchHypr starter config  (Hyprland native Lua API)
---  Hyprland exposes a global `hyprland` table with sub-modules:
---    hyprland.config   — set keyword / variable / binding options
---    hyprland.exec     — exec-once / exec
--- =============================================================================
-
-local h = hyprland        -- top-level namespace
-local config = h.config   -- config writer
-
--- ── Autostart ────────────────────────────────────────────────────────────────
--- exec_once fires once per session (uwsm handles the session lifetime).
-h.exec_once("/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1")
-h.exec_once("gnome-keyring-daemon --start --components=secrets")
-h.exec_once("nm-applet --indicator")
--- Add your bar / notification daemon / wallpaper tool here once you have dotfiles:
--- h.exec_once("waybar")
--- h.exec_once("dunst")
--- h.exec_once("swww-daemon")
-
--- ── Monitor ──────────────────────────────────────────────────────────────────
-config.keyword("monitor", ",preferred,auto,auto")
-
--- ── Environment variables ────────────────────────────────────────────────────
-local env_vars = {
-  { "XCURSOR_SIZE",                     "24"            },
-  { "XCURSOR_THEME",                    "Adwaita"       },
-  { "QT_QPA_PLATFORMTHEME",             "qt6ct"         },
-  { "QT_WAYLAND_DISABLE_WINDOWDECORATION", "1"          },
-  { "MOZ_ENABLE_WAYLAND",               "1"             },
-  { "SDL_VIDEODRIVER",                  "wayland"       },
-  { "_JAVA_AWT_WM_NONREPARENTING",      "1"             },
-  { "GDK_BACKEND",                      "wayland,x11"   },
-  { "UWSM_APP_UNIT_TYPE",               "service"       }, -- uwsm: apps as systemd services
-}
-for _, pair in ipairs(env_vars) do
-  config.keyword("env", pair[1] .. "," .. pair[2])
-end
-
--- ── Input ────────────────────────────────────────────────────────────────────
-config.keyword("input:kb_layout",           "LAYOUT_PLACEHOLDER")
-config.keyword("input:kb_variant",          "VARIANT_PLACEHOLDER")
-config.keyword("input:follow_mouse",        "1")
-config.keyword("input:repeat_rate",         "50")
-config.keyword("input:repeat_delay",        "300")
-config.keyword("input:numlock_by_default",  "true")
-config.keyword("input:sensitivity",         "0")
-config.keyword("input:touchpad:natural_scroll",       "true")
-config.keyword("input:touchpad:disable_while_typing", "true")
-config.keyword("input:touchpad:tap-to-click",         "true")
-
--- ── General ──────────────────────────────────────────────────────────────────
-config.keyword("general:gaps_in",             "5")
-config.keyword("general:gaps_out",            "10")
-config.keyword("general:border_size",         "2")
-config.keyword("general:col.active_border",   "rgba(cba6f7ff) rgba(89b4faff) 45deg")
-config.keyword("general:col.inactive_border", "rgba(313244cc)")
-config.keyword("general:layout",              "dwindle")
-config.keyword("general:allow_tearing",       "false")
-
--- ── Decoration ───────────────────────────────────────────────────────────────
-config.keyword("decoration:rounding",              "12")
-config.keyword("decoration:active_opacity",        "1.0")
-config.keyword("decoration:inactive_opacity",      "0.95")
-config.keyword("decoration:blur:enabled",          "true")
-config.keyword("decoration:blur:size",             "8")
-config.keyword("decoration:blur:passes",           "2")
-config.keyword("decoration:blur:vibrancy",         "0.17")
-config.keyword("decoration:drop_shadow",           "true")
-config.keyword("decoration:shadow_range",          "12")
-config.keyword("decoration:shadow_render_power",   "3")
-config.keyword("decoration:col.shadow",            "rgba(1a1a1aee)")
-
--- ── Animations ───────────────────────────────────────────────────────────────
-config.keyword("animations:enabled", "true")
-
-local beziers = {
-  { "expo",   "0.05, 0.9, 0.1, 1.05" },
-  { "linear", "0.0,  0.0, 1.0, 1.0"  },
-  { "snap",   "0.25, 1.0, 0.5, 1.0"  },
-}
-for _, b in ipairs(beziers) do
-  config.keyword("bezier", b[1] .. ", " .. b[2])
-end
-
-local animations = {
-  { "windows",     "1, 6,  expo"              },
-  { "windowsOut",  "1, 5,  expo, popin 80%"   },
-  { "windowsMove", "1, 5,  snap"              },
-  { "border",      "1, 10, linear"            },
-  { "borderangle", "1, 8,  linear"            },
-  { "fade",        "1, 6,  linear"            },
-  { "workspaces",  "1, 5,  snap, slide"       },
-  { "layers",      "1, 4,  snap, slide top"   },
-}
-for _, a in ipairs(animations) do
-  config.keyword("animation", a[1] .. ", " .. a[2])
-end
-
--- ── Layouts ──────────────────────────────────────────────────────────────────
-config.keyword("dwindle:pseudotile",     "true")
-config.keyword("dwindle:preserve_split", "true")
-config.keyword("dwindle:smart_split",    "true")
-config.keyword("master:new_is_master",   "false")
-
--- ── Gestures ─────────────────────────────────────────────────────────────────
-config.keyword("gestures:workspace_swipe",          "true")
-config.keyword("gestures:workspace_swipe_fingers",  "3")
-config.keyword("gestures:workspace_swipe_distance", "300")
-
--- ── Window rules ─────────────────────────────────────────────────────────────
-local windowrules = {
-  { "float",       "class:^(pavucontrol)$"       },
-  { "float",       "class:^(nm-connection-editor)$" },
-  { "float",       "class:^(blueman-manager)$"   },
-  { "float",       "class:^(imv)$"               },
-  { "float",       "title:^(Picture-in-Picture)$" },
-  { "stayfocused", "title:^(Picture-in-Picture)$" },
-  { "opacity 0.92 0.88", "class:^(kitty)$"       },
-  { "opacity 0.92 0.88", "class:^(Alacritty)$"   },
-  { "opacity 0.92 0.88", "class:^(foot)$"         },
-}
-for _, r in ipairs(windowrules) do
-  config.keyword("windowrulev2", r[1] .. ", " .. r[2])
-end
-
--- ── Keybinds ─────────────────────────────────────────────────────────────────
-local SUPER    = "SUPER"
-local terminal = "kitty"
-local browser  = "firefox"
-local files    = "thunar"
--- NOTE: No launcher (wofi/rofi) installed by default — add your own.
-
--- Helper to bind
-local function bind(mod, key, dispatcher, arg)
-  arg = arg or ""
-  config.keyword("bind", mod .. ", " .. key .. ", " .. dispatcher .. ", " .. arg)
-end
-local function binde(mod, key, dispatcher, arg)
-  arg = arg or ""
-  config.keyword("binde", mod .. ", " .. key .. ", " .. dispatcher .. ", " .. arg)
-end
-local function bindm(mod, key, dispatcher)
-  config.keyword("bindm", mod .. ", " .. key .. ", " .. dispatcher)
-end
-local function bindel(key, dispatcher, arg)
-  arg = arg or ""
-  config.keyword("bindel", ", " .. key .. ", " .. dispatcher .. ", " .. arg)
-end
-
--- Core
-bind(SUPER,           "Return", "exec",           terminal)
-bind(SUPER,           "B",      "exec",           browser)
-bind(SUPER,           "E",      "exec",           files)
-bind(SUPER,           "Q",      "killactive")
-bind(SUPER .. " SHIFT","Q",     "exit")
-bind(SUPER,           "F",      "fullscreen",     "0")
-bind(SUPER,           "V",      "togglefloating")
-bind(SUPER,           "P",      "pseudo")
-bind(SUPER,           "J",      "togglesplit")
-
--- Focus — vim keys + arrows
-for _, pair in ipairs({
-  {"h","l"},{"left","l"},{"l","r"},{"right","r"},
-  {"k","u"},{"up","u"},  {"j","d"},{"down","d"},
-}) do
-  bind(SUPER, pair[1], "movefocus", pair[2])
-end
-
--- Move windows
-for _, pair in ipairs({
-  {"H","l"},{"left","l"},{"L","r"},{"right","r"},
-  {"K","u"},{"up","u"},  {"J","d"},{"down","d"},
-}) do
-  bind(SUPER .. " SHIFT", pair[1], "movewindow", pair[2])
-end
-
--- Resize
-binde(SUPER .. " CTRL", "right", "resizeactive",  "30 0")
-binde(SUPER .. " CTRL", "left",  "resizeactive", "-30 0")
-binde(SUPER .. " CTRL", "up",    "resizeactive",  "0 -30")
-binde(SUPER .. " CTRL", "down",  "resizeactive",  "0 30")
-
--- Workspaces 1-10
-for i = 1, 9 do
-  local k = tostring(i)
-  bind(SUPER,          k, "workspace",      k)
-  bind(SUPER.." SHIFT",k, "movetoworkspace",k)
-end
-bind(SUPER,          "0", "workspace",       "10")
-bind(SUPER.." SHIFT","0", "movetoworkspace", "10")
-
--- Scroll workspaces
-config.keyword("bind", SUPER .. ", mouse_down, workspace, e+1")
-config.keyword("bind", SUPER .. ", mouse_up,   workspace, e-1")
-
--- Screenshots
-bind("",      "Print", "exec",
-  "grim -g \"$(slurp)\" - | wl-copy")
-bind("SHIFT", "Print", "exec",
-  "grim - | wl-copy")
-bind(SUPER,   "Print", "exec",
-  "grim -g \"$(slurp)\" ~/Pictures/screenshot_$(date +%Y%m%d_%H%M%S).png")
-
--- Volume
-bindel("XF86AudioRaiseVolume",  "exec", "wpctl set-volume  @DEFAULT_AUDIO_SINK@   5%+")
-bindel("XF86AudioLowerVolume",  "exec", "wpctl set-volume  @DEFAULT_AUDIO_SINK@   5%-")
-bindel("XF86AudioMute",         "exec", "wpctl set-mute    @DEFAULT_AUDIO_SINK@   toggle")
-bindel("XF86AudioMicMute",      "exec", "wpctl set-mute    @DEFAULT_AUDIO_SOURCE@ toggle")
-bindel("XF86MonBrightnessUp",   "exec", "brightnessctl set 10%+")
-bindel("XF86MonBrightnessDown", "exec", "brightnessctl set 10%-")
-
--- Mouse window manipulation
-bindm(SUPER, "mouse:272", "movewindow")
-bindm(SUPER, "mouse:273", "resizewindow")
-
--- Clipboard (cliphist — pick with no launcher by default; swap in your own)
--- bind(SUPER, "period", "exec", "cliphist list | <your-picker> | cliphist decode | wl-copy")
-LUAEOF
-
-# ── Patch Lua placeholders with actual layout / variant ──────────────────────
-sed -i "s|LAYOUT_PLACEHOLDER|${X11_LAYOUT}|g"  \
-       /home/${USERNAME}/.config/hypr/hyprland.lua
-sed -i "s|VARIANT_PLACEHOLDER|${X11_VARIANT}|g" \
-       /home/${USERNAME}/.config/hypr/hyprland.lua
-
-# Remove the variant line entirely if empty (keeps config clean)
-if [[ -z "${X11_VARIANT}" ]]; then
-  sed -i '/input:kb_variant.*""$/d' \
-         /home/${USERNAME}/.config/hypr/hyprland.lua
-fi
-
-chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.config
-
 echo "Chroot setup complete."
 CHROOT_EOF
 
@@ -878,9 +667,7 @@ CHROOT_EOF
     "  User      : ${USERNAME}  @  ${HOSTNAME}" \
     "  Timezone  : ${TIMEZONE}" \
     "  Locale    : ${LOCALE}" \
-    "  Layout    : ${X11_LAYOUT}${X11_VARIANT:+  (${X11_VARIANT})}" \
     "  Disk      : ${DISK}  [${FS}]" \
-    "  Config    : ~/.config/hypr/hyprland.lua" \
     "" \
     "$(gum style --foreground 226 '  Remove installation media and reboot.')"
   echo ""
