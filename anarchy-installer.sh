@@ -310,11 +310,12 @@ if [ "$TEST_MODE" = false ]; then
     rm -f /etc/sudoers.d/01_archiso
 
     echo ":: Adding local repository..."
+    sed -i '/\[local-repo\]/,/Server = .*/d' /etc/pacman.conf
     cat >> /etc/pacman.conf <<REPO
 
 [local-repo]
 SigLevel = Optional TrustAll
-Server = file:///root/local-repo
+Server = file:///root/local-repo/x86_64
 REPO
     pacman -Sy
 
