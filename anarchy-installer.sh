@@ -259,7 +259,7 @@ if [ "$TEST_MODE" = false ]; then
         cp "$LOCAL_REPO_SRC"/*.pkg.tar.zst "$LOCAL_REPO_DST/"
 
         gum spin --spinner dot --title "Generating repo database..." -- \
-            bash -c "cd '$LOCAL_REPO_DST' && repo-add local-repo.db.tar.gz *.pkg.tar.zst"
+            bash -c "cd '$LOCAL_REPO_DST' && repo-add local-repo.db.tar.gz *.pkg.tar.zst && rm -f local-repo.db local-repo.files && mv local-repo.db.tar.gz local-repo.db && mv local-repo.files.tar.gz local-repo.files"
         success "Local repository ready."
     else
         warn "Local repo not found at $LOCAL_REPO_SRC — skipping."
