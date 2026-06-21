@@ -1,6 +1,6 @@
 # Maintainer: Riezz0 <https://github.com/Riezz0>
 pkgname=anarchy-installer
-pkgver=0
+pkgver=0.0.2
 pkgrel=1
 pkgdesc="Interactive Arch Linux + Hyprland (UWSM) + SDDM installer powered by gum"
 arch=('any')
@@ -12,7 +12,13 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "$srcdir/$pkgname"
-    git describe --tags --abbrev=7 2>/dev/null | sed 's/^v//' || echo "0.$(git rev-list --count HEAD).$(git rev-parse --short HEAD)"
+    local ver
+    ver=$(git describe --tags --abbrev=7 2>/dev/null | sed 's/^v//;s/-/./g')
+    if [[ -n "$ver" ]]; then
+        echo "$ver"
+    else
+        echo "0.$(git rev-list --count HEAD).$(git rev-parse --short HEAD)"
+    fi
 }
 
 package() {

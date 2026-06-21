@@ -16,6 +16,7 @@ NEW_TAG="${MAJOR}.${MINOR}.${PATCH}"
 
 echo "==> Version: $LATEST_TAG -> $NEW_TAG"
 git tag -f "$NEW_TAG"
+git push origin "$NEW_TAG" --force 2>/dev/null || true
 
 echo "==> Building $PACKAGE_NAME..."
 makepkg -sf --noconfirm
