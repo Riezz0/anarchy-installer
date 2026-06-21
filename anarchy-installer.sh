@@ -41,6 +41,9 @@ banner() {
 # --- 0. Safety Cleanup ---
 umount -R /mnt &>/dev/null
 
+# Detect real user home (before sudo)
+REAL_HOME=$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)
+
 # --- 1. Checks ---
 if [[ $EUID -ne 0 ]]; then
     error "Run with sudo!"
@@ -250,7 +253,7 @@ echo
 # --- Step 5: Local Repository Setup ---
 step "5/6  Local Repository"
 if [ "$TEST_MODE" = false ]; then
-    LOCAL_REPO_SRC="$HOME/git/anarchy/local-repo/x86_64"
+    LOCAL_REPO_SRC="$REAL_HOME/git/anarchy/local-repo/x86_64"
     LOCAL_REPO_DST="/mnt/root/local-repo/x86_64"
 
     if [ -d "$LOCAL_REPO_SRC" ]; then
