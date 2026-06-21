@@ -331,7 +331,11 @@ main() {
 All data on the chosen disk will be DESTROYED. Continue?" \
     || { echo "Aborted."; exit 0; }
 
-  check_internet
+  if gum confirm "Check internet connectivity before proceeding?"; then
+    check_internet
+  else
+    log_warn "Skipping internet check."
+  fi
 
   # ── Regional & Hardware ────────────────────────────────────────────────────
   pick_timezone
@@ -474,11 +478,17 @@ $(gum style --foreground 81 '  ────────────────�
   timedatectl set-ntp true
   log_ok "NTP synchronised."
 
-  log_step "Optimising Mirrors"
-  run_spin "Ranking mirrors by speed…" \
-    reflector --latest 20 --protocol https --sort rate \
-              --save /etc/pacman.d/mirrorlist
-  log_ok "Mirrors updated."
+  SKIP_REFLECTOR=false
+  if gum confirm "Rank mirrors with reflector for faster downloads?"; then
+    log_step "Optimising Mirrors"
+    run_spin "Ranking mirrors by speed…" \
+      reflector --latest 20 --protocol https --sort rate \
+                --save /etc/pacman.d/mirrorlist
+    log_ok "Mirrors updated."
+  else
+    log_warn "Skipping mirror optimisation."
+    SKIP_REFLECTOR=true
+  fi
 
   partition_disk "$DISK" "$SWAP_SIZE"
   format_partitions "$FS"
@@ -491,8 +501,8 @@ $(gum style --foreground 81 '  ────────────────�
     "$KERNEL" "${KERNEL_HEADERS}" linux-firmware
     networkmanager sudo nano vim
     efibootmgr dosfstools gptfdisk
-    reflector
   )
+  "$SKIP_REFLECTOR" || BASE_PKGS+=(reflector)
   [[ "$FS" == "btrfs" ]] && BASE_PKGS+=(btrfs-progs)
   [[ -n "$CPU_UCODE" ]] && BASE_PKGS+=("$CPU_UCODE")
 
@@ -502,7 +512,7 @@ $(gum style --foreground 81 '  ────────────────�
   esac
 
   case "$GPU" in
-    amd)    GPU_PKGS=(mesa vulkan-radeon libva-mesa-driver mesa-vdpau xf86-video-amdgpu) ;;
+    amd)    GPU_PKGS=(mesa vulkan-radeon libva-mesa-driver xf86-video-amdgpu) ;;
     intel)  GPU_PKGS=(mesa vulkan-intel intel-media-driver xf86-video-intel) ;;
     nvidia) GPU_PKGS=(nvidia nvidia-utils nvidia-settings) ;;
     vm)     GPU_PKGS=(mesa xf86-video-vmware open-vm-tools) ;;
