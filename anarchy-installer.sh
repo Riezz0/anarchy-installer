@@ -560,6 +560,7 @@ $(gum style --foreground 81 '  ────────────────�
   # ── Build chroot script ────────────────────────────────────────────────────
   log_step "Configuring Installed System (chroot)"
 
+  mkdir -p /mnt/tmp
   cat > /mnt/tmp/arch-chroot-setup.sh << CHROOT_EOF
 #!/usr/bin/env bash
 set -euo pipefail
