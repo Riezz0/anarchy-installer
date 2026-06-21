@@ -140,8 +140,11 @@ for gpu in "${GPU_DRIVERS[@]}"; do
 done
 GPU_PKGS=$(echo "$GPU_PKGS" | xargs)  # trim whitespace
 
-GPU_DISPLAY="${GPU_DRIVERS[*]:-none}"
-[ ${#GPU_DRIVERS[@]} -eq 0 ] && GPU_DISPLAY="none"
+if [ ${#GPU_DRIVERS[@]} -eq 0 ]; then
+    GPU_DISPLAY="none"
+else
+    GPU_DISPLAY="${GPU_DRIVERS[*]}"
+fi
 
 # 6. Summary
 clear
@@ -173,7 +176,7 @@ set -e
 banner "Installing"
 
 # --- Step 1: Partitioning ---
-step "1/6  Partitioning $TARGET_DRIVE"
+step "1/7  Partitioning $TARGET_DRIVE"
 if [ "$TEST_MODE" = false ]; then
     gum spin --spinner dot --title "Wiping disk..." -- sgdisk -Z $TARGET_DRIVE
     if [ "$IS_EFI" = true ]; then
@@ -192,7 +195,7 @@ fi
 echo
 
 # --- Step 2: Formatting ---
-step "2/6  Formatting"
+step "2/7  Formatting"
 if [ "$TEST_MODE" = false ]; then
     if [ "$IS_EFI" = true ]; then
         gum spin --spinner dot --title "Formatting EFI (FAT32)..." -- mkfs.vfat -F 32 "$EFI_PART"
@@ -203,7 +206,7 @@ fi
 echo
 
 # --- Step 3: Btrfs Subvolumes ---
-step "3/6  Btrfs Subvolumes"
+step "3/7  Btrfs Subvolumes"
 if [ "$TEST_MODE" = false ]; then
     info "Mounting root temporarily..."
     mount "$ROOT_PART" /mnt
@@ -238,7 +241,7 @@ fi
 echo
 
 # --- Step 4: Cloning System ---
-step "4/6  Cloning System"
+step "4/7  Cloning System"
 if [ "$TEST_MODE" = false ]; then
     rsync -aAXhW --numeric-ids --info=progress2 \
         --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
@@ -251,7 +254,7 @@ fi
 echo
 
 # --- Step 5: Local Repository Setup ---
-step "5/6  Local Repository"
+step "5/7  Local Repository"
 if [ "$TEST_MODE" = false ]; then
     LOCAL_REPO_SRC="/root/local-repo/x86_64"
     LOCAL_REPO_DST="/mnt/root/local-repo/x86_64"
@@ -270,8 +273,51 @@ if [ "$TEST_MODE" = false ]; then
 fi
 echo
 
-# --- Step 6: Configuration (Chroot) ---
-step "6/6  System Configuration"
+# --- Step 6: System Packages ---
+step "6/7  System Packages"
+if [ "$TEST_MODE" = false ] && [ -d "/root/local-repo/x86_64" ]; then
+    info "Installing Hyprland desktop environment..."
+    gum spin --spinner dot --title "Installing packages..." -- \
+        pacman -S --noconfirm --needed \
+            hypridle hyprlock pyprland nwg-displays nwg-look \
+            kitty rofi xfce-polkit swaync awww gradience-git \
+            ttf-font-awesome
+
+    info "Installing audio stack..."
+    gum spin --spinner dot --title "Installing audio..." -- \
+        pacman -S --noconfirm --needed \
+            pipewire-audio pipewire-pulse wireplumber vlc
+
+    info "Installing Bluetooth..."
+    gum spin --spinner dot --title "Installing bluetooth..." -- \
+        pacman -S --noconfirm --needed \
+            blueman bluez bluez-utils
+
+    info "Installing Qt theming..."
+    gum spin --spinner dot --title "Installing Qt..." -- \
+        pacman -S --noconfirm --needed \
+            qt5-graphicaleffects qt5-imageformats qt5-multimedia \
+            qt5-quickcontrols qt5-quickcontrols2 qt5-styleplugins qt5-svg \
+            qt6 qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg
+
+    info "Installing shell enhancements..."
+    gum spin --spinner dot --title "Installing shell..." -- \
+        pacman -S --noconfirm --needed \
+            eza neovim oh-my-zsh-git \
+            zsh-autocomplete zsh-autosuggestions zsh-autoswitch-virtualenv-git \
+            zsh-fast-syntax-highlighting zsh-syntax-highlighting
+
+    info "Installing system utilities..."
+    gum spin --spinner dot --title "Installing utilities..." -- \
+        pacman -S --noconfirm --needed \
+            plymouth goverlay-git vkbasalt python-pywal16
+
+    success "System packages installed."
+fi
+echo
+
+# --- Step 7: Configuration (Chroot) ---
+step "7/7  System Configuration"
 if [ "$TEST_MODE" = false ]; then
     genfstab -U /mnt >> /mnt/etc/fstab
     cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
@@ -320,7 +366,6 @@ if [ "$TEST_MODE" = false ]; then
 SigLevel = Optional TrustAll
 Server = file:///root/local-repo/x86_64
 REPO
-    pacman -Sy
 
     echo ":: Installing Linux kernel, firmware, and drivers..."
     pacman -Sy --noconfirm \
