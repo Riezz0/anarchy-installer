@@ -112,7 +112,7 @@ CPU_MICROCODE=$(gum choose \
     "amd-ucode" "intel-ucode")
 
 # GPU Drivers (multi-select)
-GPU_DRIVERS=($(gum choose \
+mapfile -t GPU_DRIVERS < <(gum choose \
     --header "Select GPU driver(s) (space to select, enter to confirm)" \
     --no-limit \
     "mesa (open-source)" \
@@ -122,7 +122,7 @@ GPU_DRIVERS=($(gum choose \
     "xf86-video-intel" \
     "xf86-video-nouveau" \
     "virtualbox-guest-utils" \
-    "open-vm-tools"))
+    "open-vm-tools")
 
 # Map display names to package names
 GPU_PKGS=""
@@ -139,6 +139,9 @@ for gpu in "${GPU_DRIVERS[@]}"; do
     esac
 done
 GPU_PKGS=$(echo "$GPU_PKGS" | xargs)  # trim whitespace
+
+GPU_DISPLAY="${GPU_DRIVERS[*]:-none}"
+[ ${#GPU_DRIVERS[@]} -eq 0 ] && GPU_DISPLAY="none"
 
 # 6. Summary
 clear
@@ -158,7 +161,7 @@ $(gum style --foreground "$YELLOW" "  Partition:  $ROOT_PART")
 $(gum style --foreground "$TEAL"   "  Boot Mode:  $([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")
 $(gum style --foreground "$RED"    "  Kernel:     $KERNEL")
 $(gum style --foreground "$BLUE"   "  CPU:        $CPU_MICROCODE")
-$(gum style --foreground "$MAUVE"  "  GPU:        ${GPU_DRIVERS[*]:-none}")"
+$(gum style --foreground "$MAUVE"  "  GPU:        $GPU_DISPLAY")"
 
 echo
 gum confirm --affirmative "Proceed" --negative "Abort" \
