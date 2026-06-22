@@ -1,67 +1,22 @@
 #!/bin/bash
 
-# --- Colors ---
-RED="#f38ba8"
-GREEN="#a6e3a1"
-YELLOW="#f9e2af"
-BLUE="#89b4fa"
-MAUVE="#cba6f7"
-TEAL="#94e2d5"
-PEACH="#fab387"
-OVERLAY1="#6c7086"
-SURFACE2="#585b70"
-TEXT="#cdd6f4"
-BASE="#1e1e2e"
-MANTLE="#181825"
-CRUST="#11111b"
-
-# --- Helpers ---
-info()    { gum style --foreground "$BLUE" " :: $1"; }
-success() { gum style --foreground "$GREEN" " :: $1"; }
-warn()    { gum style --foreground "$YELLOW" " :: $1"; }
-error()   { gum style --foreground "$RED" --bold " ✗ $1"; }
-step()    { gum style --foreground "$MAUVE" --bold "── $1 ──"; }
-
-header() {
-    gum style \
-        --foreground "$MAUVE" \
-        --border double \
-        --align center \
-        --width 56 \
-        --padding "0 2" \
-        "$1"
-}
-
-banner() {
-    echo
-    figlet -f smslant "$1"
-    echo
-}
-
 # --- 0. Safety Cleanup ---
 umount -R /mnt &>/dev/null
 
 # --- 1. Checks ---
 if [[ $EUID -ne 0 ]]; then
-    error "Run with sudo!"
-    exit 1
+   gum style --foreground "#f38ba8" "ERROR: Run with sudo!"
+   exit 1
 fi
 
-info "Checking internet connection..."
+echo ":: Checking internet..."
 if ! ping -c 1 8.8.8.8 &>/dev/null; then
-    error "Internet connection required."
-    exit 1
+   gum style --foreground "#f38ba8" "ERROR: Internet required."
+   exit 1
 fi
-success "Internet connection verified."
 
-banner "ML4W OS Install"
-
-gum style \
-    --foreground "$TEXT" \
-    --align center \
-    --width 56 \
-    "This script will install ML4W OS" \
-    "to your hard drive."
+figlet -f smslant "ML4W OS Install"
+echo ":: This script will install ML4W OS to your hard drive."
 echo
 
 # --- 2. Setup ---
@@ -70,187 +25,136 @@ TEST_MODE=false
 IS_EFI=false
 [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
 
-if [ "$TEST_MODE" = true ]; then
-    warn "Running in TEST MODE — disk operations will be skipped."
-    echo
-fi
-
 # 3. Drive Selection
-step "Drive Selection"
-TARGET_DRIVE=$(lsblk -dpno NAME,SIZE | gum choose --header "Select target drive" | awk '{print $1}')
+TARGET_DRIVE=$(lsblk -dpno NAME,SIZE | gum choose --header "Select Drive" | awk '{print $1}')
 [ -z "$TARGET_DRIVE" ] && exit 1
 if [[ $TARGET_DRIVE =~ [0-9]$ ]]; then P="p"; else P=""; fi
 EFI_PART="${TARGET_DRIVE}${P}1"
 ROOT_PART="${TARGET_DRIVE}${P}2"
 
 # 4. Input Validation
-step "System Configuration"
 ROOT_PASS=""
 while [[ -z "$ROOT_PASS" ]]; do ROOT_PASS=$(gum input --password --placeholder "Root Password"); done
 NEW_USER=""
 while [[ -z "$NEW_USER" ]]; do NEW_USER=$(gum input --placeholder "Username"); done
 NEW_PASS=""
 while [[ -z "$NEW_PASS" ]]; do NEW_PASS=$(gum input --password --placeholder "User Password"); done
-TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Type to search timezone..." --height 12 --limit 1)
-[ -z "$TIMEZONE" ] && TIMEZONE="UTC"
+TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Select Timezone")
+[ -z "$TIMEZONE" ] && TIMEZONE="UTC" # Default fallback
 NEW_HOSTNAME=""
 while [[ -z "$NEW_HOSTNAME" ]]; do NEW_HOSTNAME=$(gum input --placeholder "Hostname"); done
 
-# 5. Hardware Selection
-step "Hardware Selection"
+# --- Kernel Selection ---
+KERNEL=$(gum choose --header "Select Kernel" "linux" "linux-lts" "linux-zen" "linux-hardened")
 
-# Kernel
-KERNEL=$(gum choose \
-    --header "Select kernel" \
-    "linux" "linux-lts" "linux-zen" "linux-hardened")
-[ -z "$KERNEL" ] && KERNEL="linux"
+# --- CPU Microcode ---
+CPU=$(gum choose --header "Select CPU Microcode" "intel-ucode" "amd-ucode")
 
-# CPU Microcode
-CPU_MICROCODE=$(gum choose \
-    --header "Select CPU microcode" \
-    "amd-ucode" "intel-ucode")
-[ -z "$CPU_MICROCODE" ] && CPU_MICROCODE="amd-ucode"
-
-# GPU Drivers (multi-select) — write to temp file to avoid mapfile/TTY conflict
-_GPU_TMP=$(mktemp)
-gum choose \
-    --header "Select GPU driver(s) (space to select, enter to confirm)" \
-    --no-limit \
-    "mesa (open-source)" \
-    "nvidia (proprietary)" \
-    "nvidia-open (open-source NVIDIA)" \
-    "xf86-video-amdgpu" \
+# --- GPU Driver Selection ---
+GPU_RAW=$(gum choose --no-limit --header "Select GPU Driver(s)" \
+    "mesa" \
+    "nvidia" \
+    "nvidia-lts" \
+    "nvidia-dkms" \
     "xf86-video-intel" \
-    "xf86-video-nouveau" \
-    "virtualbox-guest-utils" \
-    "open-vm-tools" > "$_GPU_TMP"
-mapfile -t GPU_DRIVERS < "$_GPU_TMP"
-rm -f "$_GPU_TMP"
-# Ensure we got at least one selection
-if [ ${#GPU_DRIVERS[@]} -eq 0 ]; then
-    warn "No GPU driver selected — defaulting to mesa."
-    GPU_DRIVERS=("mesa (open-source)")
-fi
+    "vulkan-radeon" \
+    "vulkan-intel" \
+    "lib32-mesa" \
+    "lib32-nvidia-utils" \
+    "lib32-vulkan-radeon" \
+    "lib32-vulkan-intel" \
+    "none")
+GPU_PKGS=$(echo "$GPU_RAW" | grep -v "^none$" | tr '\n' ' ')
 
-# Map display names to package names
-GPU_PKGS=""
-for gpu in "${GPU_DRIVERS[@]}"; do
-    case "$gpu" in
-        "mesa (open-source)")          GPU_PKGS+=" mesa " ;;
-        "nvidia (proprietary)")        GPU_PKGS+=" nvidia nvidia-utils " ;;
-        "nvidia-open (open-source NVIDIA)") GPU_PKGS+=" nvidia-open nvidia-utils " ;;
-        "xf86-video-amdgpu")           GPU_PKGS+=" xf86-video-amdgpu " ;;
-        "xf86-video-intel")            GPU_PKGS+=" xf86-video-intel " ;;
-        "xf86-video-nouveau")          GPU_PKGS+=" xf86-video-nouveau " ;;
-        "virtualbox-guest-utils")      GPU_PKGS+=" virtualbox-guest-utils " ;;
-        "open-vm-tools")               GPU_PKGS+=" open-vm-tools " ;;
-    esac
-done
-GPU_PKGS=$(echo "$GPU_PKGS" | xargs)  # trim whitespace
+# --- Audio Selection ---
+AUDIO=$(gum choose --header "Select Audio Stack" "pipewire" "pipewire-full" "pulseaudio" "pulseaudio-equalizer")
 
-if [ ${#GPU_DRIVERS[@]} -eq 0 ]; then
-    GPU_DISPLAY="none"
-else
-    # Join array with ", " for a clean single-line display
-    GPU_DISPLAY=$(IFS=", "; echo "${GPU_DRIVERS[*]}")
-fi
-
-# 6. Summary
+# 5. Summary
 clear
-banner "Summary"
+figlet -f smslant "Summary"
+echo "  User:      $NEW_USER"
+echo "  Timezone:  $TIMEZONE"
+echo "  Hostname:  $NEW_HOSTNAME"
+echo "  Drive:     $TARGET_DRIVE"
+echo "  Partition: $ROOT_PART"
+echo "  Boot Mode: $([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")"
+echo "  Kernel:    $KERNEL"
+echo "  CPU:       $CPU"
+echo "  GPU:       ${GPU_RAW:-none}"
+echo "  Audio:     $AUDIO"
+echo ""
+gum confirm "WARNING: This will wipe $TARGET_DRIVE. Continue?" || exit 1
 
-gum style \
-    --border double \
-    --align left \
-    --width 56 \
-    --padding "1 2" \
-    --margin "0 2" \
-    "$(gum style --foreground "$GREEN"  "  User:       $NEW_USER")
-$(gum style --foreground "$BLUE"   "  Timezone:   $TIMEZONE")
-$(gum style --foreground "$MAUVE"  "  Hostname:   $NEW_HOSTNAME")
-$(gum style --foreground "$PEACH"  "  Drive:      $TARGET_DRIVE")
-$(gum style --foreground "$YELLOW" "  Partition:  $ROOT_PART")
-$(gum style --foreground "$TEAL"   "  Boot Mode:  $([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")
-$(gum style --foreground "$RED"    "  Kernel:     $KERNEL")
-$(gum style --foreground "$BLUE"   "  CPU:        $CPU_MICROCODE")
-$(gum style --foreground "$MAUVE"  "  GPU:        $GPU_DISPLAY")"
+set -e 
+# --- EXECUTION ---
 
+echo 
+echo ":: Step 1: Partitioning..."
 echo
-gum confirm --affirmative "Proceed" --negative "Abort" \
-    "$(gum style --foreground "$RED" --bold "WARNING: This will ERASE $TARGET_DRIVE. Continue?")" || exit 1
-
-set -e
-
-# --- Execution Banner ---
-banner "Installing"
-
-# --- Step 1: Partitioning ---
-step "1/6  Partitioning $TARGET_DRIVE"
 if [ "$TEST_MODE" = false ]; then
-    gum spin --spinner dot --title "Wiping disk..." -- sgdisk -Z $TARGET_DRIVE
+    sgdisk -Z $TARGET_DRIVE
     if [ "$IS_EFI" = true ]; then
-        gum spin --spinner dot --title "Creating EFI partition..." -- \
-            sgdisk -n 1:0:+512M -t 1:ef00 $TARGET_DRIVE
+        sgdisk -n 1:0:+512M -t 1:ef00 $TARGET_DRIVE
     else
-        gum spin --spinner dot --title "Creating BIOS partition..." -- \
-            sgdisk -n 1:0:+1M -t 1:ef02 $TARGET_DRIVE
+        # BIOS FIX: Use relative alignment to prevent sector 34 error
+        sgdisk -n 1:0:+1M -t 1:ef02 $TARGET_DRIVE
     fi
-    gum spin --spinner dot --title "Creating root partition..." -- \
-        sgdisk -n 2:0:0 -t 2:8300 $TARGET_DRIVE
-    gum spin --spinner dot --title "Probing partitions..." -- partprobe $TARGET_DRIVE
-    sleep 1
-    success "Disk partitioned."
+    sgdisk -n 2:0:0 -t 2:8300 $TARGET_DRIVE
+    partprobe $TARGET_DRIVE
+    sleep 2
 fi
-echo
 
-# --- Step 2: Formatting ---
-step "2/6  Formatting"
+echo
+echo ":: Step 2: Formatting..."
+echo
 if [ "$TEST_MODE" = false ]; then
-    if [ "$IS_EFI" = true ]; then
-        gum spin --spinner dot --title "Formatting EFI (FAT32)..." -- mkfs.vfat -F 32 "$EFI_PART"
-    fi
-    gum spin --spinner dot --title "Formatting root (Btrfs)..." -- mkfs.btrfs -L ARCH_ROOT -f "$ROOT_PART"
-    success "Filesystems created."
+    if [ "$IS_EFI" = true ]; then mkfs.vfat -F 32 "$EFI_PART"; fi
+    mkfs.btrfs -L ARCH_ROOT -f "$ROOT_PART"
 fi
-echo
 
-# --- Step 3: Btrfs Subvolumes ---
-step "3/6  Btrfs Subvolumes"
+echo
+echo ":: Step 3: Btrfs Subvolumes..."
+echo
 if [ "$TEST_MODE" = false ]; then
-    info "Mounting root temporarily..."
+
+    echo ":: Mounting root temporarily to create subvolumes..."
     mount "$ROOT_PART" /mnt
+    
+    echo ":: Creating subvolumes..."
+    btrfs subvolume create /mnt/@
+    btrfs subvolume create /mnt/@home
+    btrfs subvolume create /mnt/@log
+    btrfs subvolume create /mnt/@pkg
+    btrfs subvolume create /mnt/@.snapshots
 
-    gum spin --spinner dot --title "Creating subvolumes..." -- bash -c '
-        btrfs subvolume create /mnt/@
-        btrfs subvolume create /mnt/@home
-        btrfs subvolume create /mnt/@log
-        btrfs subvolume create /mnt/@pkg
-        btrfs subvolume create /mnt/@.snapshots
-    '
-
-    info "Remounting with correct options..."
+    echo ":: Unmounting to remount with correct options..."
     umount /mnt
+    
+    echo ":: Mounting root..."
     mount -o noatime,compress=zstd,subvol=@ "$ROOT_PART" /mnt
 
-    info "Creating directory structure..."
-    mkdir -p /mnt/{home,var/log,var/cache/pacman/pkg,.snapshots,boot}
+    echo ":: Creating directories..."
+    mkdir -p /mnt/home
+    mkdir -p /mnt/var/log
+    mkdir -p /mnt/var/cache/pacman/pkg
+    mkdir -p /mnt/.snapshots
+    mkdir -p /mnt/boot
 
-    info "Mounting subvolumes..."
+    echo ":: Mounting subvolumes..."
     mount -o noatime,compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
     mount -o noatime,compress=zstd,subvol=@log "$ROOT_PART" /mnt/var/log
     mount -o noatime,compress=zstd,subvol=@pkg "$ROOT_PART" /mnt/var/cache/pacman/pkg
     mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
 
-    if [ "$IS_EFI" = true ]; then
-        info "Mounting EFI partition..."
-        mount "$EFI_PART" /mnt/boot
+    if [ "$IS_EFI" = true ]; then 
+        echo ":: Mounting EFI..."
+        mount "$EFI_PART" /mnt/boot; 
     fi
-    success "Subvolumes configured."
 fi
-echo
 
-# --- Step 4: Cloning System ---
-step "4/6  Cloning System"
+echo
+echo ":: Step 4: Cloning System..."
+echo
 if [ "$TEST_MODE" = false ]; then
     rsync -aAXhW --numeric-ids --info=progress2 \
         --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
@@ -258,180 +162,132 @@ if [ "$TEST_MODE" = false ]; then
         --exclude="/var/log/*" \
         --exclude="/etc/pacman.d/gnupg/*" \
         / /mnt/
-    success "System cloned to target."
 fi
+
 echo
-
-# --- Step 5: Local Repository Setup ---
-step "5/6  Local Repository"
-if [ "$TEST_MODE" = false ]; then
-    LOCAL_REPO_SRC="/root/local-repo/x86_64"
-    LOCAL_REPO_DST="/mnt/root/local-repo/x86_64"
-
-    if [ -d "$LOCAL_REPO_SRC" ]; then
-        info "Copying local repo packages to target..."
-        mkdir -p "$LOCAL_REPO_DST"
-        cp "$LOCAL_REPO_SRC"/*.pkg.tar.zst "$LOCAL_REPO_DST/"
-
-        gum spin --spinner dot --title "Generating repo database..." -- \
-            bash -c "cd '$LOCAL_REPO_DST' && repo-add local-repo.db.tar.gz *.pkg.tar.zst && rm -f local-repo.db local-repo.files && mv local-repo.db.tar.gz local-repo.db && mv local-repo.files.tar.gz local-repo.files"
-        success "Local repository ready."
-    else
-        warn "Local repo not found at $LOCAL_REPO_SRC — skipping."
-    fi
-fi
+echo ":: Step 5: Configuration (Chroot)..."
 echo
-
-# --- Step 7: Configuration (Chroot) ---
-step "6/6  System Configuration"
 if [ "$TEST_MODE" = false ]; then
     genfstab -U /mnt >> /mnt/etc/fstab
     cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
 
-    info "Resolving root UUID..."
+    echo ":: Waiting for UUID..."
     partprobe $TARGET_DRIVE
     udevadm settle
     sleep 2
     ROOT_UUID=$(lsblk -no UUID $ROOT_PART)
     if [ -z "$ROOT_UUID" ]; then sleep 3; ROOT_UUID=$(blkid -s UUID -o value $ROOT_PART); fi
-    if [ -z "$ROOT_UUID" ]; then error "No UUID found for $ROOT_PART"; exit 1; fi
-    success "UUID resolved: $ROOT_UUID"
+    if [ -z "$ROOT_UUID" ]; then echo "ERROR: No UUID found."; exit 1; fi
 
-    info "Entering chroot to configure system..."
+    # --- Copy local repo to target ---
+    LOCAL_REPO_SRC=""
+    for candidate in /root/local-repo /local-repo; do
+        if [ -d "$candidate" ]; then
+            LOCAL_REPO_SRC="$candidate"
+            break
+        fi
+    done
+
+    if [ -n "$LOCAL_REPO_SRC" ]; then
+        echo ":: Copying local repo from $LOCAL_REPO_SRC..."
+        mkdir -p /mnt/var/cache/local-repo
+        cp -r "$LOCAL_REPO_SRC"/* /mnt/var/cache/local-repo/
+    else
+        gum style --foreground "#f38ba8" "WARNING: Local repo not found — packages will install from official repos only."
+    fi
+
     arch-chroot /mnt /bin/bash <<EOF
     set -e
     pacman-key --init
     pacman-key --populate archlinux
-
-    echo ":: Repairing pacman database (fix cloned live-ISO corruption)..."
-    pacman-db-upgrade 2>/dev/null || true
-    # Remove any corrupt local DB entries that reference %INSTALLED_DB%
-    find /var/lib/pacman/local -name desc -exec grep -l '%INSTALLED_DB%' {} \; | \
-        xargs -I{} sed -i '/%INSTALLED_DB%/,+1d' {} 2>/dev/null || true
-
+    
     echo ":: Cleaning boot config..."
     pacman -Rns --noconfirm archiso || true
     rm -rf /etc/mkinitcpio.conf.d
     rm -f /etc/mkinitcpio.d/*.preset
-    # NOTE: Do NOT remove vmlinuz/initramfs here — kernel install uses --needed
-    # so if it's already up to date pacman won't recreate them. They get
-    # overwritten by mkinitcpio below after the preset is written.
-
+    rm -f /boot/vmlinuz* /boot/initramfs*
+    
     echo "MODULES=(btrfs)" > /etc/mkinitcpio.conf
     echo "BINARIES=()" >> /etc/mkinitcpio.conf
     echo "FILES=()" >> /etc/mkinitcpio.conf
     echo "HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)" >> /etc/mkinitcpio.conf
-
-    echo ":: Removing live user and autologin configs..."
+    
+    echo ":: Removing Live User and Autologin configs..."
     userdel -f -r liveuser || true
     rm -rf /etc/sddm.conf.d/*
     if [ -f /etc/sddm.conf ]; then
         sed -i '/Autologin/d' /etc/sddm.conf
         sed -i '/User=liveuser/d' /etc/sddm.conf
     fi
+
     rm -f /etc/sudoers.d/g_wheel
     rm -f /etc/sudoers.d/01_archiso
+    
+    echo ":: Configuring Local Repository..."
+    if [ -d /var/cache/local-repo ]; then
+        cat >> /etc/pacman.conf <<REPO
 
-    echo ":: Adding local repository..."
-    sed -i '/\[local-repo\]/,/Server = .*/d' /etc/pacman.conf
-    cat >> /etc/pacman.conf <<REPO
-
-[local-repo]
-SigLevel = Optional TrustAll
-Server = file:///root/local-repo/x86_64
+[anarchy-local]
+SigLevel = TrustAll
+Server = file:///var/cache/local-repo/x86_64
 REPO
+        pacman -Sy --noconfirm
 
-    echo ":: Syncing package databases (local repo first)..."
-    pacman -Sy --noconfirm
+        echo ":: Installing all packages from local repo..."
+        LOCAL_PKGS=$(pacman -Sl anarchy-local | awk '{print $2}')
+        if [ -n "$LOCAL_PKGS" ]; then
+            pacman -S --noconfirm --needed $LOCAL_PKGS
+        fi
+    fi
 
-    echo ":: Installing Linux kernel, firmware, and drivers..."
-    pacman -S --noconfirm --needed \
-        "$KERNEL" \
-        linux-firmware \
-        "$CPU_MICROCODE" \
-        btrfs-progs \
-        grub \
-        $GPU_PKGS \
-        $([ "$IS_EFI" = true ] && echo "efibootmgr")
+    echo ":: Installing Linux Packages..."
+    KERNEL_PKG="$KERNEL"
+    CPU_PKG="$CPU"
+    AUDIO_PKG="$AUDIO"
+    GRUB_PKG="grub $([ "$IS_EFI" = true ] && echo "efibootmgr")"
 
-    echo ":: Writing mkinitcpio preset for $KERNEL..."
-    # Preset must be written explicitly — pacman --needed skips reinstall
-    # so the preset file may not exist if the kernel was already up to date
-    mkdir -p /etc/mkinitcpio.d
-    cat > /etc/mkinitcpio.d/${KERNEL}.preset << MKINIT_PRESET
-ALL_config="/etc/mkinitcpio.conf"
-ALL_kver="/boot/vmlinuz-${KERNEL}"
+    pacman -Sy --noconfirm linux-firmware btrfs-progs $KERNEL_PKG $CPU_PKG $GPU_PKGS $AUDIO_PKG $GRUB_PKG
+    mkinitcpio -P
 
-PRESETS=('default' 'fallback')
-
-default_image="/boot/initramfs-${KERNEL}.img"
-fallback_image="/boot/initramfs-${KERNEL}-fallback.img"
-fallback_options="-S autodetect"
-MKINIT_PRESET
-
-    mkinitcpio -p "$KERNEL"
-
-    echo ":: Installing system packages..."
-    pacman -S --noconfirm --needed --overwrite '*' \
-        hypridle hyprlock pyprland nwg-displays nwg-look \
-        kitty rofi xfce-polkit swaync awww gradience-git \
-        ttf-font-awesome \
-        pipewire pipewire-alsa pipewire-audio pipewire-pulse wireplumber vlc \
-        blueman bluez bluez-utils \
-        qt5-graphicaleffects qt5-imageformats qt5-multimedia \
-        qt5-quickcontrols qt5-quickcontrols2 qt5-styleplugins qt5-svg \
-        qt6 qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg \
-        gtk2 \
-        eza neovim oh-my-zsh-git \
-        zsh-autocomplete zsh-autosuggestions zsh-autoswitch-virtualenv-git \
-        zsh-fast-syntax-highlighting zsh-syntax-highlighting \
-        plymouth goverlay-git vkbasalt python-pywal16
-
-    echo ":: Installing GRUB..."
+    echo ":: Installing Grub..."
     if [ "$IS_EFI" = true ]; then
         grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
     else
         grub-install --target=i386-pc "$TARGET_DRIVE" --recheck
     fi
+    
     sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
     sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"root=UUID=$ROOT_UUID rootflags=subvol=@ rw\"|" /etc/default/grub
     grub-mkconfig -o /boot/grub/grub.cfg
-
-    echo "Setting hostname to $NEW_HOSTNAME..."
+    
+    echo "Setting Hostname..."
     echo "$NEW_HOSTNAME" > /etc/hostname
 
-    echo "Setting timezone to $TIMEZONE..."
+    echo "Setting Timezone to $TIMEZONE..."
     ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
     hwclock --systohc
 
-    echo "Setting root password..."
+    echo "Setting password for root..."
     echo "root:$ROOT_PASS" | chpasswd
 
-    echo "Creating user '$NEW_USER'..."
+    echo "Adding new user '$NEW_USER'..."
     useradd -m -G wheel -s /bin/bash "$NEW_USER"
     echo "$NEW_USER:$NEW_PASS" | chpasswd
     sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-    echo "Enabling services..."
+    echo "Enabling NetworkManager..."    
     systemctl enable NetworkManager
+
+    echo "Enabling sddm..."    
     systemctl enable sddm
 EOF
     umount -R /mnt
-    success "System configured."
 fi
 
-# --- Completion ---
-banner "Done!"
-gum style \
-    --foreground "$GREEN" \
-    --align center \
-    --width 56 \
-    "Installation complete!" \
-    "Reboot and enjoy ML4W OS."
 echo
-
-if gum confirm --affirmative "Reboot" --negative "Stay" "Reboot now?"; then
-    gum style --foreground "$YELLOW" --bold " :: Rebooting in 3 seconds..."
-    sleep 3
+figlet -f smslant "Done!"
+echo ":: Installation Complete. Reboot and enjoy ML4W OS!"
+echo
+if gum confirm "Do you want to reboot your system now?"; then
     reboot
 fi
