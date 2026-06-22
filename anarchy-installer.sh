@@ -91,7 +91,7 @@ NEW_USER=""
 while [[ -z "$NEW_USER" ]]; do NEW_USER=$(gum input --placeholder "Username"); done
 NEW_PASS=""
 while [[ -z "$NEW_PASS" ]]; do NEW_PASS=$(gum input --password --placeholder "User Password"); done
-TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Select Timezone")
+TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Type to search timezone..." --height 12 --limit 1)
 [ -z "$TIMEZONE" ] && TIMEZONE="UTC"
 NEW_HOSTNAME=""
 while [[ -z "$NEW_HOSTNAME" ]]; do NEW_HOSTNAME=$(gum input --placeholder "Hostname"); done
@@ -102,17 +102,18 @@ step "Hardware Selection"
 # Kernel
 KERNEL=$(gum choose \
     --header "Select kernel" \
-    --selected "linux" \
     "linux" "linux-lts" "linux-zen" "linux-hardened")
+[ -z "$KERNEL" ] && KERNEL="linux"
 
 # CPU Microcode
 CPU_MICROCODE=$(gum choose \
     --header "Select CPU microcode" \
-    --selected "amd-ucode" \
     "amd-ucode" "intel-ucode")
+[ -z "$CPU_MICROCODE" ] && CPU_MICROCODE="amd-ucode"
 
-# GPU Drivers (multi-select)
-mapfile -t GPU_DRIVERS < <(gum choose \
+# GPU Drivers (multi-select) — write to temp file to avoid mapfile/TTY conflict
+_GPU_TMP=$(mktemp)
+gum choose \
     --header "Select GPU driver(s) (space to select, enter to confirm)" \
     --no-limit \
     "mesa (open-source)" \
@@ -122,7 +123,9 @@ mapfile -t GPU_DRIVERS < <(gum choose \
     "xf86-video-intel" \
     "xf86-video-nouveau" \
     "virtualbox-guest-utils" \
-    "open-vm-tools" 2>/dev/null)
+    "open-vm-tools" > "$_GPU_TMP"
+mapfile -t GPU_DRIVERS < "$_GPU_TMP"
+rm -f "$_GPU_TMP"
 # Ensure we got at least one selection
 if [ ${#GPU_DRIVERS[@]} -eq 0 ]; then
     warn "No GPU driver selected — defaulting to mesa."
