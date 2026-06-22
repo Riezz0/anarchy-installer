@@ -227,14 +227,14 @@ if [ "$TEST_MODE" = false ]; then
     if [ -d /var/cache/local-repo ]; then
         cat >> /etc/pacman.conf <<REPO
 
-[anarchy-local]
+[local-repo]
 SigLevel = TrustAll
 Server = file:///var/cache/local-repo/x86_64
 REPO
         pacman -Sy --noconfirm
 
         echo ":: Installing all packages from local repo..."
-        LOCAL_PKGS=$(pacman -Sl anarchy-local | awk '{print $2}')
+        LOCAL_PKGS=$(pacman -Sl local-repo | awk '{print $2}')
         if [ -n "$LOCAL_PKGS" ]; then
             pacman -S --noconfirm --needed $LOCAL_PKGS
         fi
