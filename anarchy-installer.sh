@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 # --- 0. Safety Cleanup ---
@@ -69,6 +70,9 @@ GPU_PKGS=$(echo "$GPU_RAW" | grep -v "^none$" | tr '\n' ' ')
 # --- Audio Selection ---
 AUDIO=$(gum choose --header "Select Audio Stack" "pipewire" "pipewire-full" "pulseaudio" "pulseaudio-equalizer")
 
+# --- Custom Repository Apps (required for dotfiles) ---
+INSTALL_CUSTOM_APPS=true
+
 # 5. Summary
 clear
 figlet -f smslant "Summary"
@@ -82,6 +86,7 @@ echo "  Kernel:    $KERNEL"
 echo "  CPU:       $CPU"
 echo "  GPU:       ${GPU_RAW:-none}"
 echo "  Audio:     $AUDIO"
+echo "  Custom:    Yes (anarchy-repo)"
 echo ""
 gum confirm "WARNING: This will wipe $TARGET_DRIVE. Continue?" || exit 1
 
@@ -240,6 +245,30 @@ REPO
         fi
     else
         echo ":: No valid local repo found — skipping."
+    fi
+
+    echo ":: Installing Custom Repository Apps..."
+    if [ "$INSTALL_CUSTOM_APPS" = true ]; then
+        echo ":: Cloning anarchy-repo from GitHub..."
+        git clone https://github.com/Riezz0/anarchy-repo /tmp/anarchy-repo
+        mkdir -p /var/cache/custom-repo
+        cp -r /tmp/anarchy-repo/x86_64/* /var/cache/custom-repo/
+
+        cat >> /etc/pacman.conf <<REPO
+
+[custom-repo]
+SigLevel = TrustAll
+Server = file:///var/cache/custom-repo/x86_64
+REPO
+        pacman -Sy --noconfirm
+
+        CUSTOM_PKGS=$(pacman -Sl custom-repo 2>/dev/null | awk '{print $2}')
+        if [ -n "$CUSTOM_PKGS" ]; then
+            pacman -S --noconfirm --needed $CUSTOM_PKGS
+        fi
+        rm -rf /tmp/anarchy-repo
+    else
+        echo ":: Skipping custom repository apps."
     fi
 
     echo ":: Installing Linux Packages..."
