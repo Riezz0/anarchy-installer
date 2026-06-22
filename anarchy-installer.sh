@@ -122,7 +122,12 @@ mapfile -t GPU_DRIVERS < <(gum choose \
     "xf86-video-intel" \
     "xf86-video-nouveau" \
     "virtualbox-guest-utils" \
-    "open-vm-tools")
+    "open-vm-tools" 2>/dev/null)
+# Ensure we got at least one selection
+if [ ${#GPU_DRIVERS[@]} -eq 0 ]; then
+    warn "No GPU driver selected — defaulting to mesa."
+    GPU_DRIVERS=("mesa (open-source)")
+fi
 
 # Map display names to package names
 GPU_PKGS=""
@@ -143,7 +148,8 @@ GPU_PKGS=$(echo "$GPU_PKGS" | xargs)  # trim whitespace
 if [ ${#GPU_DRIVERS[@]} -eq 0 ]; then
     GPU_DISPLAY="none"
 else
-    GPU_DISPLAY="${GPU_DRIVERS[*]}"
+    # Join array with ", " for a clean single-line display
+    GPU_DISPLAY=$(IFS=", "; echo "${GPU_DRIVERS[*]}")
 fi
 
 # 6. Summary
@@ -294,6 +300,12 @@ if [ "$TEST_MODE" = false ]; then
     pacman-key --init
     pacman-key --populate archlinux
 
+    echo ":: Repairing pacman database (fix cloned live-ISO corruption)..."
+    pacman-db-upgrade 2>/dev/null || true
+    # Remove any corrupt local DB entries that reference %INSTALLED_DB%
+    find /var/lib/pacman/local -name desc -exec grep -l '%INSTALLED_DB%' {} \; | \
+        xargs -I{} sed -i '/%INSTALLED_DB%/,+1d' {} 2>/dev/null || true
+
     echo ":: Cleaning boot config..."
     pacman -Rns --noconfirm archiso || true
     rm -rf /etc/mkinitcpio.conf.d
@@ -324,8 +336,11 @@ SigLevel = Optional TrustAll
 Server = file:///root/local-repo/x86_64
 REPO
 
+    echo ":: Syncing package databases (local repo first)..."
+    pacman -Sy --noconfirm
+
     echo ":: Installing Linux kernel, firmware, and drivers..."
-    pacman -Sy --noconfirm \
+    pacman -S --noconfirm --needed \
         "$KERNEL" \
         linux-firmware \
         "$CPU_MICROCODE" \
@@ -336,15 +351,16 @@ REPO
     mkinitcpio -P
 
     echo ":: Installing system packages..."
-    pacman -S --noconfirm --needed \
+    pacman -S --noconfirm --needed --overwrite '*' \
         hypridle hyprlock pyprland nwg-displays nwg-look \
         kitty rofi xfce-polkit swaync awww gradience-git \
         ttf-font-awesome \
-        pipewire-audio pipewire-pulse wireplumber vlc \
+        pipewire pipewire-alsa pipewire-audio pipewire-pulse wireplumber vlc \
         blueman bluez bluez-utils \
         qt5-graphicaleffects qt5-imageformats qt5-multimedia \
         qt5-quickcontrols qt5-quickcontrols2 qt5-styleplugins qt5-svg \
         qt6 qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg \
+        gtk2 \
         eza neovim oh-my-zsh-git \
         zsh-autocomplete zsh-autosuggestions zsh-autoswitch-virtualenv-git \
         zsh-fast-syntax-highlighting zsh-syntax-highlighting \
