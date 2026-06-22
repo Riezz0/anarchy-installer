@@ -313,7 +313,9 @@ if [ "$TEST_MODE" = false ]; then
     pacman -Rns --noconfirm archiso || true
     rm -rf /etc/mkinitcpio.conf.d
     rm -f /etc/mkinitcpio.d/*.preset
-    rm -f /boot/vmlinuz* /boot/initramfs*
+    # NOTE: Do NOT remove vmlinuz/initramfs here — kernel install uses --needed
+    # so if it's already up to date pacman won't recreate them. They get
+    # overwritten by mkinitcpio below after the preset is written.
 
     echo "MODULES=(btrfs)" > /etc/mkinitcpio.conf
     echo "BINARIES=()" >> /etc/mkinitcpio.conf
@@ -351,7 +353,23 @@ REPO
         grub \
         $GPU_PKGS \
         $([ "$IS_EFI" = true ] && echo "efibootmgr")
-    mkinitcpio -P
+
+    echo ":: Writing mkinitcpio preset for $KERNEL..."
+    # Preset must be written explicitly — pacman --needed skips reinstall
+    # so the preset file may not exist if the kernel was already up to date
+    mkdir -p /etc/mkinitcpio.d
+    cat > /etc/mkinitcpio.d/${KERNEL}.preset << MKINIT_PRESET
+ALL_config="/etc/mkinitcpio.conf"
+ALL_kver="/boot/vmlinuz-${KERNEL}"
+
+PRESETS=('default' 'fallback')
+
+default_image="/boot/initramfs-${KERNEL}.img"
+fallback_image="/boot/initramfs-${KERNEL}-fallback.img"
+fallback_options="-S autodetect"
+MKINIT_PRESET
+
+    mkinitcpio -p "$KERNEL"
 
     echo ":: Installing system packages..."
     pacman -S --noconfirm --needed --overwrite '*' \
