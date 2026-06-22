@@ -202,7 +202,7 @@ if [ "$TEST_MODE" = false ]; then
     pacman-key --populate archlinux
     
     echo ":: Cleaning boot config..."
-    pacman -Rns --noconfirm archiso || true
+    pacman -Rns --noconfirm archiso 2>/dev/null || true
     rm -rf /etc/mkinitcpio.conf.d
     rm -f /etc/mkinitcpio.d/*.preset
     rm -f /boot/vmlinuz* /boot/initramfs*
@@ -224,7 +224,7 @@ if [ "$TEST_MODE" = false ]; then
     rm -f /etc/sudoers.d/01_archiso
     
     echo ":: Configuring Local Repository..."
-    if [ -d /var/cache/local-repo ]; then
+    if [ -d /var/cache/local-repo/x86_64 ] && [ "$(ls -A /var/cache/local-repo/x86_64 2>/dev/null)" ]; then
         cat >> /etc/pacman.conf <<REPO
 
 [local-repo]
@@ -234,10 +234,12 @@ REPO
         pacman -Sy --noconfirm
 
         echo ":: Installing all packages from local repo..."
-        LOCAL_PKGS=$(pacman -Sl local-repo | awk '{print $2}')
+        LOCAL_PKGS=$(pacman -Sl local-repo 2>/dev/null | awk '{print $2}')
         if [ -n "$LOCAL_PKGS" ]; then
             pacman -S --noconfirm --needed $LOCAL_PKGS
         fi
+    else
+        echo ":: No valid local repo found — skipping."
     fi
 
     echo ":: Installing Linux Packages..."
@@ -247,7 +249,11 @@ REPO
     GRUB_PKG="grub $([ "$IS_EFI" = true ] && echo "efibootmgr")"
 
     pacman -Sy --noconfirm linux-firmware btrfs-progs $KERNEL_PKG $CPU_PKG $GPU_PKGS $AUDIO_PKG $GRUB_PKG
-    mkinitcpio -P
+    if ls /etc/mkinitcpio.d/*.preset &>/dev/null; then
+        mkinitcpio -P
+    else
+        echo ":: WARNING: No mkinitcpio presets found — skipping initramfs regeneration."
+    fi
 
     echo ":: Installing Grub..."
     if [ "$IS_EFI" = true ]; then
