@@ -1,4 +1,5 @@
 #!/bin/bash
+#!/bin/bash
 
 # --- Color Palette (Tokyo Night) ---
 C_RED="#f7768e"      # color1
@@ -124,20 +125,25 @@ CPU=$(gum choose --header "Select CPU Microcode" "intel-ucode" "amd-ucode")
 ok "CPU: $CPU"
 
 GPU_RAW=$(gum choose --no-limit --header "Select GPU Driver(s) (Space to select, Enter to confirm)" \
-    "mesa" "nvidia" "nvidia-lts" "nvidia-dkms" "xf86-video-intel" "vulkan-radeon" "vulkan-intel" "none")
+    "mesa" \
+    "nvidia" \
+    "nvidia-lts" \
+    "nvidia-dkms" \
+    "xf86-video-intel" \
+    "vulkan-radeon" \
+    "vulkan-intel" \
+    "none")
 GPU_PKGS=$(echo "$GPU_RAW" | grep -v "^none$" | tr '\n' ' ')
 ok "GPU: ${GPU_RAW:-none}"
 
 AUDIO=$(gum choose --header "Select Audio Server" "pipewire" "pulseaudio")
+# Automatically append necessary companion packages based on choice
 if [ "$AUDIO" = "pipewire" ]; then
     AUDIO_PKGS="pipewire pipewire-pulse wireplumber"
 else
     AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth"
 fi
 ok "Audio: $AUDIO"
-
-AUR_HELPER=$(gum choose --header "Select AUR Helper" "yay" "paru" "pikaur" "none")
-ok "AUR Helper: $AUR_HELPER"
 echo
 
 # --- 6. Summary ---
@@ -152,7 +158,10 @@ echo "  $(gum style --foreground "$C_SUBTEXT" "Drive:")     $(gum style --foregr
 echo "  $(gum style --foreground "$C_SUBTEXT" "Boot Mode:") $(gum style --foreground "$C_TEAL" "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")"
 echo
 echo "  $(gum style --foreground "$C_SUBTEXT" "Kernel:")    $(gum style --foreground "$C_MAUVE" --bold "$KERNEL")"
-echo "  $(gum style --foreground "$C_SUBTEXT" "AUR:")       $(gum style --foreground "$C_MAUVE" "$AUR_HELPER")"
+echo "  $(gum style --foreground "$C_SUBTEXT" "CPU:")       $(gum style --foreground "$C_MAUVE" "$CPU")"
+echo "  $(gum style --foreground "$C_SUBTEXT" "GPU:")       $(gum style --foreground "$C_MAUVE" "${GPU_RAW:-none}")"
+echo "  $(gum style --foreground "$C_SUBTEXT" "Audio:")     $(gum style --foreground "$C_MAUVE" "$AUDIO")"
+echo
 echo
 gum confirm --affirmative "Proceed" --negative "Abort" "  ⚠  This will WIPE $TARGET_DRIVE. Continue?" || exit 1
 echo
@@ -162,11 +171,13 @@ set -e
 
 # --- Step 1: Partitioning ---
 step "Partitioning $TARGET_DRIVE..."
+echo
 if [ "$TEST_MODE" = false ]; then
     sgdisk -Z $TARGET_DRIVE
     if [ "$IS_EFI" = true ]; then
         sgdisk -n 1:0:+512M -t 1:ef00 $TARGET_DRIVE
     else
+        # BIOS FIX: Use relative alignment to prevent sector 34 error
         sgdisk -n 1:0:+1M -t 1:ef02 $TARGET_DRIVE
     fi
     sgdisk -n 2:0:0 -t 2:8300 $TARGET_DRIVE
@@ -178,6 +189,7 @@ echo
 
 # --- Step 2: Formatting ---
 step "Formatting partitions..."
+echo
 if [ "$TEST_MODE" = false ]; then
     if [ "$IS_EFI" = true ]; then mkfs.vfat -F 32 "$EFI_PART"; fi
     mkfs.btrfs -L ARCH_ROOT -f "$ROOT_PART"
@@ -187,16 +199,23 @@ echo
 
 # --- Step 3: Btrfs Subvolumes ---
 step "Creating Btrfs subvolumes..."
+echo
 if [ "$TEST_MODE" = false ]; then
+    info "Mounting root temporarily..."
     mount "$ROOT_PART" /mnt
+    
+    info "Creating subvolumes..."
     btrfs subvolume create /mnt/@
     btrfs subvolume create /mnt/@home
     btrfs subvolume create /mnt/@log
     btrfs subvolume create /mnt/@pkg
     btrfs subvolume create /mnt/@.snapshots
+
     umount /mnt
     
+    info "Mounting subvolumes with optimal options..."
     mount -o noatime,compress=zstd,subvol=@ "$ROOT_PART" /mnt
+
     mkdir -p /mnt/home /mnt/var/log /mnt/var/cache/pacman/pkg /mnt/.snapshots /mnt/boot
 
     mount -o noatime,compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
@@ -204,13 +223,16 @@ if [ "$TEST_MODE" = false ]; then
     mount -o noatime,compress=zstd,subvol=@pkg "$ROOT_PART" /mnt/var/cache/pacman/pkg
     mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
 
-    if [ "$IS_EFI" = true ]; then mount "$EFI_PART" /mnt/boot; fi
+    if [ "$IS_EFI" = true ]; then 
+        mount "$EFI_PART" /mnt/boot; 
+    fi
     ok "Subvolumes mounted"
 fi
 echo
 
 # --- Step 4: Cloning System ---
 step "Cloning system to target..."
+echo
 if [ "$TEST_MODE" = false ]; then
     rsync -aAXhW --numeric-ids --info=progress2 \
         --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
@@ -224,21 +246,21 @@ echo
 
 # --- Step 5: Configuration (Chroot) ---
 step "Configuring target system..."
+echo
 if [ "$TEST_MODE" = false ]; then
     genfstab -U /mnt >> /mnt/etc/fstab
     cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
 
+    info "Waiting for UUID..."
     partprobe $TARGET_DRIVE
     udevadm settle
     sleep 2
     ROOT_UUID=$(lsblk -no UUID $ROOT_PART)
-    
+    if [ -z "$ROOT_UUID" ]; then sleep 3; ROOT_UUID=$(blkid -s UUID -o value $ROOT_PART); fi
+    if [ -z "$ROOT_UUID" ]; then fail "No UUID found."; exit 1; fi
+
     arch-chroot /mnt /bin/bash <<EOF
     set -e
-    
-    echo ":: Repairing cloned pacman database..."
-    find /var/lib/pacman/local/ -type f -name "desc" -exec sed -i '/^%INSTALLED_DB%/,/^$/d' {} +
-
     pacman-key --init
     pacman-key --populate archlinux
     
@@ -289,24 +311,6 @@ if [ "$TEST_MODE" = false ]; then
     useradd -m -G wheel -s /bin/bash "$NEW_USER"
     echo "$NEW_USER:$NEW_PASS" | chpasswd
     sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
-
-    if [ "$AUR_HELPER" != "none" ]; then
-        echo ":: Installing AUR Helper: $AUR_HELPER"
-        pacman -S --needed --noconfirm base-devel git
-        
-        # Build as the new user
-        sudo -u "$NEW_USER" bash -c "
-            cd /home/$NEW_USER
-            case '$AUR_HELPER' in
-                yay) git clone https://aur.archlinux.org/yay-bin.git && cd yay-bin ;;
-                paru) git clone https://aur.archlinux.org/paru-bin.git && cd paru-bin ;;
-                pikaur) git clone https://aur.archlinux.org/pikaur.git && cd pikaur ;;
-            esac
-            makepkg -si --noconfirm
-            cd ..
-            rm -rf *build* *bin*
-        "
-    fi
 
     echo ":: Enabling Services..."    
     systemctl enable NetworkManager
