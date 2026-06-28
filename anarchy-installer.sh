@@ -345,7 +345,7 @@ if [ "$TEST_MODE" = false ]; then
 
     echo ":: Configuring GRUB Theme..."
     cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
-    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub/tokyo-night" "/usr/share/grub/themes/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"
 
     echo ":: Installing NCT6687D Driver..."
     git clone https://github.com/Fred78290/nct6687d "/home/$NEW_USER/mydots/nct6687d/"
