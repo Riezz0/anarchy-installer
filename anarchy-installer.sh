@@ -339,8 +339,8 @@ if [ "$TEST_MODE" = false ]; then
     rm -rf "/home/$NEW_USER/.local"
 
     cd "/home/$NEW_USER/anarchydots"
-    sudo -u "$NEW_USER" stow bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh -t ~/ 
-    sudo -u "$NEW_USER" stow cursors 
+    sudo -u "$NEW_USER" stow bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh -t "/home/$NEW_USER"
+    sudo -u "$NEW_USER" stow cursors -t "/home/$NEW_USER"
     echo ":: Installing Fonts..."
     mkdir -p "/home/$NEW_USER/.local/share/fonts/"
     cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
