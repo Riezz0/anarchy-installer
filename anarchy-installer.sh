@@ -278,7 +278,9 @@ if [ "$TEST_MODE" = false ]; then
     rm -f /etc/sudoers.d/01_archiso
     
     echo ":: Installing Kernel, Drivers, and Core Packages..."
-    pacman -Sy --noconfirm $KERNEL $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
+    KERNEL_HEADERS="${KERNEL}-headers"
+    [[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
+    pacman -Sy --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
     mkinitcpio -P
 
     echo ":: Configuring Grub..."
@@ -339,6 +341,11 @@ if [ "$TEST_MODE" = false ]; then
         sudo -u "$NEW_USER" stow --dir="/home/$NEW_USER/anarchydots" --target="/home/$NEW_USER" "$pkg" 2>/dev/null || true
     done
 
+    echo ":: Installing Fonts..."
+    mkdir -p "/home/$NEW_USER/.local/share/fonts/"
+    cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
+    fc-cache -fv
+
     echo ":: Configuring SDDM..."
     cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
     cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
@@ -347,14 +354,7 @@ if [ "$TEST_MODE" = false ]; then
     cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
     cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"
 
-    echo ":: Installing NCT6687D Driver..."
-    git clone https://github.com/Fred78290/nct6687d "/home/$NEW_USER/mydots/nct6687d/"
-    cd "/home/$NEW_USER/mydots/nct6687d/" && make dkms/install
-    cp "/home/$NEW_USER/anarchydots/sys/no_nct6683.conf" /etc/modprobe.d/
-    cp "/home/$NEW_USER/anarchydots/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
-
     echo ":: Enabling Additional Services..."
-    modprobe nct6687
     grub-mkconfig -o /boot/grub/grub.cfg
     systemctl enable --now bluetooth
     systemctl enable --now coolercontrold.service
