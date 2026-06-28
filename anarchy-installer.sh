@@ -329,30 +329,15 @@ if [ "$TEST_MODE" = false ]; then
     git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
     chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
-    echo ":: Stowing System Files..."
-    cd "/home/$NEW_USER/anarchydots"
-
-    stow_clean() {
-        local pkg="$1"
-        local target="${2:-/home/$NEW_USER}"
-        # Dry-run stow to find conflicts, then delete the blocking real files
-        stow -n -t "$target" "$pkg" 2>&1 | grep "existing target is neither" | awk '{print $NF}' | while read conflict; do
-            rm -f "$target/$conflict"
-        done
-        stow -t "$target" "$pkg"
-    }
-
-    stow_clean scripts /usr/local
-    stow_clean bg /usr/share
-
     echo ":: Stowing Dotfiles Packages..."
+    cd "/home/$NEW_USER/anarchydots"
     PACKAGES=(
-        cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
+        bg cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
         kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
         themes wal xkb zsh
     )
     for pkg in "${PACKAGES[@]}"; do
-        stow_clean "$pkg" || true
+        stow "$pkg" 2>/dev/null || true
     done
 
     echo ":: Configuring SDDM..."
