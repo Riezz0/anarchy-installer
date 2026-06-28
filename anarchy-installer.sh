@@ -50,30 +50,17 @@ info() {
     gum style --foreground "$C_SUBTEXT" "     $1"
 }
 
-# --- Post-Install Functions ---
-
-clone_dotfiles() {
-    step "Cloning dotfiles repository..."
-    if [ -d "$HOME/anarchydots" ]; then
-        info "Dotfiles already cloned, pulling latest..."
-        git -C "$HOME/anarchydots" pull
-    else
-        git clone https://github.com/Riezz0/anarchydots "$HOME/anarchydots"
-    fi
-    ok "Dotfiles cloned to ~/anarchydots/"
-}
+# --- Post-Install Functions (run inside chroot) ---
 
 stow_system_files() {
-    step "Stowing system files..."
-    cd "$HOME/anarchydots"
+    echo ":: Stowing system files..."
     sudo stow -t /usr/local scripts
     sudo stow -t /usr/share bg
-    ok "System files stowed"
+    echo "  ✔ System files stowed"
 }
 
 stow_dotfiles() {
-    step "Stowing dotfiles packages..."
-    cd "$HOME/anarchydots"
+    echo ":: Stowing dotfiles packages..."
     local PACKAGES=(
         cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
         kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
@@ -82,56 +69,56 @@ stow_dotfiles() {
     
     for pkg in "${PACKAGES[@]}"; do
         if stow -v "$pkg" 2>&1 | grep -q "conflict"; then
-            info "Conflict detected for $pkg, using restore..."
+            echo "     Conflict detected for $pkg, using restore..."
             stow -D "$pkg" 2>/dev/null || true
             stow "$pkg"
         else
             stow "$pkg" 2>/dev/null || true
         fi
     done
-    ok "Dotfiles packages stowed"
+    echo "  ✔ Dotfiles packages stowed"
 }
 
 configure_sddm() {
-    step "Configuring SDDM..."
-    sudo cp -r "/home/$USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
-    sudo cp -r "/home/$USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
-    ok "SDDM configured"
+    echo ":: Configuring SDDM..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
+    echo "  ✔ SDDM configured"
 }
 
 configure_grub() {
-    step "Configuring GRUB theme..."
-    sudo cp -r "/home/$USER/anarchydots/sys/grub/grub" "/etc/default/"
-    sudo cp -r "/home/$USER/anarchydots/sys/grub/grub/tokyo-night" "/usr/share/grub/themes/"
-    ok "GRUB theme applied"
+    echo ":: Configuring GRUB theme..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub/tokyo-night" "/usr/share/grub/themes/"
+    echo "  ✔ GRUB theme applied"
 }
 
 install_nct6687d() {
-    step "Installing NCT6687D driver..."
-    git clone https://github.com/Fred78290/nct6687d "/home/$USER/mydots/nct6687d/"
-    cd "/home/$USER/mydots/nct6687d/" && make dkms/install
-    sudo cp "/home/$USER/anarchydots/sys/no_nct6683.conf" /etc/modprobe.d/
-    sudo cp "/home/$USER/anarchydots/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
-    ok "NCT6687D driver installed"
+    echo ":: Installing NCT6687D driver..."
+    git clone https://github.com/Fred78290/nct6687d "/home/$NEW_USER/mydots/nct6687d/"
+    cd "/home/$NEW_USER/mydots/nct6687d/" && make dkms/install
+    cp "/home/$NEW_USER/anarchydots/sys/no_nct6683.conf" /etc/modprobe.d/
+    cp "/home/$NEW_USER/anarchydots/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
+    echo "  ✔ NCT6687D driver installed"
 }
 
 enable_services() {
-    step "Enabling additional services..."
-    sudo modprobe nct6687
-    sudo grub-mkconfig -o /boot/grub/grub.cfg
-    sudo systemctl enable --now bluetooth
-    sudo systemctl enable --now coolercontrold.service
+    echo ":: Enabling additional services..."
+    modprobe nct6687
+    grub-mkconfig -o /boot/grub/grub.cfg
+    systemctl enable --now bluetooth
+    systemctl enable --now coolercontrold.service
     chsh -s "$(which zsh)"
-    ok "Services enabled"
+    echo "  ✔ Services enabled"
 }
 
 configure_hyprmon() {
-    step "Configuring hyprmon display settings..."
+    echo ":: Configuring hyprmon display settings..."
     rm -f ~/.config/hypr/hyprmon.lua
     rm -f ~/.config/hypr/hyprland.lua.bak.*
-    info "Launch hyprmon to setup display settings for this machine"
-    info "Settings will be saved to ~/.config/hypr/hyprmon.lua"
-    ok "Hyprmon ready for configuration"
+    echo "     Launch hyprmon to setup display settings for this machine"
+    echo "     Settings will be saved to ~/.config/hypr/hyprmon.lua"
+    echo "  ✔ Hyprmon ready for configuration"
 }
 
 # --- 0. Safety Cleanup ---
@@ -397,21 +384,15 @@ if [ "$TEST_MODE" = false ]; then
     echo ":: Enabling Services..."    
     systemctl enable NetworkManager
     systemctl enable sddm
-EOF
-    umount -R /mnt
-    ok "Configuration complete"
-fi
 
-# --- Step 6: Post-Install Configuration ---
-if [ "$TEST_MODE" = false ]; then
-    section "Post-Install Configuration"
-    echo
+    echo ":: Cloning Dotfiles..."
+    git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
+    chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
+
+    echo ":: Stowing Dotfiles..."
+    cd "/home/$NEW_USER/anarchydots"
     
-    clone_dotfiles
-    
-    if gum confirm "Apply stow system files (scripts, bg)?"; then
-        stow_system_files
-    fi
+    stow_system_files
     
     if gum confirm "Stow dotfiles packages?"; then
         stow_dotfiles
@@ -432,6 +413,9 @@ if [ "$TEST_MODE" = false ]; then
     if gum confirm "Enable additional services (bluetooth, coolercontrol, zsh)?"; then
         enable_services
     fi
+EOF
+    umount -R /mnt
+    ok "Configuration complete"
 fi
 
 echo
