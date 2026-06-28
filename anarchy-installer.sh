@@ -331,10 +331,22 @@ if [ "$TEST_MODE" = false ]; then
 
     echo ":: Stowing System Files..."
     cd "/home/$NEW_USER/anarchydots"
-    stow --adopt -t /usr/local scripts
-    git -C "/home/$NEW_USER/anarchydots" checkout -- .
-    stow --adopt -t /usr/share bg
-    git -C "/home/$NEW_USER/anarchydots" checkout -- .
+
+    # Remove any conflicting files in /usr/local before stowing
+    find /home/$NEW_USER/anarchydots/scripts -type f | while read src; do
+        rel="${src#/home/$NEW_USER/anarchydots/scripts/}"
+        target="/usr/local/$rel"
+        [ -e "$target" ] && ! [ -L "$target" ] && rm -f "$target"
+    done
+    stow -t /usr/local scripts
+
+    # Remove any conflicting files in /usr/share before stowing
+    find /home/$NEW_USER/anarchydots/bg -type f | while read src; do
+        rel="${src#/home/$NEW_USER/anarchydots/bg/}"
+        target="/usr/share/$rel"
+        [ -e "$target" ] && ! [ -L "$target" ] && rm -f "$target"
+    done
+    stow -t /usr/share bg
 
     echo ":: Stowing Dotfiles Packages..."
     PACKAGES=(
@@ -343,8 +355,13 @@ if [ "$TEST_MODE" = false ]; then
         themes wal xkb zsh
     )
     for pkg in "${PACKAGES[@]}"; do
-        stow --adopt "$pkg" 2>/dev/null || true
-        git -C "/home/$NEW_USER/anarchydots" checkout -- . 2>/dev/null || true
+        # Remove conflicting files in $HOME before stowing each package
+        find /home/$NEW_USER/anarchydots/$pkg -type f 2>/dev/null | while read src; do
+            rel="${src#/home/$NEW_USER/anarchydots/$pkg/}"
+            target="/home/$NEW_USER/$rel"
+            [ -e "$target" ] && ! [ -L "$target" ] && rm -f "$target"
+        done
+        stow "$pkg" 2>/dev/null || true
     done
 
     echo ":: Configuring SDDM..."
