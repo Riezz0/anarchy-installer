@@ -56,9 +56,9 @@ configure_hyprmon() {
     echo ":: Configuring hyprmon display settings..."
     rm -f ~/.config/hypr/hyprmon.lua
     rm -f ~/.config/hypr/hyprland.lua.bak.*
-    echo "     Launch hyprmon to setup display settings for this machine"
-    echo "     Settings will be saved to ~/.config/hypr/hyprmon.lua"
-    echo "  ✔ Hyprmon ready for configuration"
+    step "Launching hyprmon — configure your monitors then quit to continue..."
+    hyprmon
+    ok "Hyprmon configuration saved"
 }
 
 # --- 0. Safety Cleanup ---
@@ -332,22 +332,15 @@ if [ "$TEST_MODE" = false ]; then
     chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
     echo ":: Stowing Dotfiles Packages..."
-    PACKAGES=(
-        bg cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
-        kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
-        themes wal xkb zsh
-    )
-
-    echo ":: Cleaning conflicting config folders..."
-    for pkg in "${PACKAGES[@]}"; do
-        rm -rf "/home/$NEW_USER/.config/$pkg"
-    done
+    rm -rf "/home/$NEW_USER/.config/kitty"
+    rm -rf "/home/$NEW_USER/.config/hyprland"
+    rm -rf "/home/$NEW_USER/.icons"
+    rm -rf "/home/$NEW_USER/.themes"
+    rm -rf "/home/$NEW_USER/.local"
 
     cd "/home/$NEW_USER/anarchydots"
-    for pkg in "${PACKAGES[@]}"; do
-        sudo -u "$NEW_USER" stow "$pkg" || true
-    done
-
+    sudo -u "$NEW_USER" stow bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh -t ~/ 
+    sudo -u "$NEW_USER" stow cursors 
     echo ":: Installing Fonts..."
     mkdir -p "/home/$NEW_USER/.local/share/fonts/"
     cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
