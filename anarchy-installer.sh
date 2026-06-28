@@ -50,67 +50,7 @@ info() {
     gum style --foreground "$C_SUBTEXT" "     $1"
 }
 
-# --- Post-Install Functions (run inside chroot) ---
-
-stow_system_files() {
-    echo ":: Stowing system files..."
-    sudo stow -t /usr/local scripts
-    sudo stow -t /usr/share bg
-    echo "  ✔ System files stowed"
-}
-
-stow_dotfiles() {
-    echo ":: Stowing dotfiles packages..."
-    local PACKAGES=(
-        cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
-        kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
-        themes wal xkb zsh
-    )
-    
-    for pkg in "${PACKAGES[@]}"; do
-        if stow -v "$pkg" 2>&1 | grep -q "conflict"; then
-            echo "     Conflict detected for $pkg, using restore..."
-            stow -D "$pkg" 2>/dev/null || true
-            stow "$pkg"
-        else
-            stow "$pkg" 2>/dev/null || true
-        fi
-    done
-    echo "  ✔ Dotfiles packages stowed"
-}
-
-configure_sddm() {
-    echo ":: Configuring SDDM..."
-    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
-    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
-    echo "  ✔ SDDM configured"
-}
-
-configure_grub() {
-    echo ":: Configuring GRUB theme..."
-    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
-    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub/tokyo-night" "/usr/share/grub/themes/"
-    echo "  ✔ GRUB theme applied"
-}
-
-install_nct6687d() {
-    echo ":: Installing NCT6687D driver..."
-    git clone https://github.com/Fred78290/nct6687d "/home/$NEW_USER/mydots/nct6687d/"
-    cd "/home/$NEW_USER/mydots/nct6687d/" && make dkms/install
-    cp "/home/$NEW_USER/anarchydots/sys/no_nct6683.conf" /etc/modprobe.d/
-    cp "/home/$NEW_USER/anarchydots/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
-    echo "  ✔ NCT6687D driver installed"
-}
-
-enable_services() {
-    echo ":: Enabling additional services..."
-    modprobe nct6687
-    grub-mkconfig -o /boot/grub/grub.cfg
-    systemctl enable --now bluetooth
-    systemctl enable --now coolercontrold.service
-    chsh -s "$(which zsh)"
-    echo "  ✔ Services enabled"
-}
+# --- Post-Install Functions ---
 
 configure_hyprmon() {
     echo ":: Configuring hyprmon display settings..."
@@ -389,30 +329,42 @@ if [ "$TEST_MODE" = false ]; then
     git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
     chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
-    echo ":: Stowing Dotfiles..."
+    echo ":: Stowing System Files..."
     cd "/home/$NEW_USER/anarchydots"
-    
-    stow_system_files
-    
-    if gum confirm "Stow dotfiles packages?"; then
-        stow_dotfiles
-    fi
-    
-    if gum confirm "Configure SDDM theme?"; then
-        configure_sddm
-    fi
-    
-    if gum confirm "Apply GRUB theme?"; then
-        configure_grub
-    fi
-    
-    if gum confirm "Install NCT6687D driver?"; then
-        install_nct6687d
-    fi
-    
-    if gum confirm "Enable additional services (bluetooth, coolercontrol, zsh)?"; then
-        enable_services
-    fi
+    stow -t /usr/local scripts
+    stow -t /usr/share bg
+
+    echo ":: Stowing Dotfiles Packages..."
+    local PACKAGES=(
+        cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
+        kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
+        themes wal xkb zsh
+    )
+    for pkg in "${PACKAGES[@]}"; do
+        stow -v "$pkg" 2>&1 | grep -q "conflict" && stow -D "$pkg" 2>/dev/null || true
+        stow "$pkg" 2>/dev/null || true
+    done
+
+    echo ":: Configuring SDDM..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
+
+    echo ":: Configuring GRUB Theme..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub/tokyo-night" "/usr/share/grub/themes/"
+
+    echo ":: Installing NCT6687D Driver..."
+    git clone https://github.com/Fred78290/nct6687d "/home/$NEW_USER/mydots/nct6687d/"
+    cd "/home/$NEW_USER/mydots/nct6687d/" && make dkms/install
+    cp "/home/$NEW_USER/anarchydots/sys/no_nct6683.conf" /etc/modprobe.d/
+    cp "/home/$NEW_USER/anarchydots/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
+
+    echo ":: Enabling Additional Services..."
+    modprobe nct6687
+    grub-mkconfig -o /boot/grub/grub.cfg
+    systemctl enable --now bluetooth
+    systemctl enable --now coolercontrold.service
+    chsh -s "$(which zsh)"
 EOF
     umount -R /mnt
     ok "Configuration complete"
