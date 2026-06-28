@@ -50,6 +50,17 @@ info() {
     gum style --foreground "$C_SUBTEXT" "     $1"
 }
 
+# --- Post-Install Functions ---
+
+configure_hyprmon() {
+    echo ":: Configuring hyprmon display settings..."
+    rm -f ~/.config/hypr/hyprmon.lua
+    rm -f ~/.config/hypr/hyprland.lua.bak.*
+    echo "     Launch hyprmon to setup display settings for this machine"
+    echo "     Settings will be saved to ~/.config/hypr/hyprmon.lua"
+    echo "  ✔ Hyprmon ready for configuration"
+}
+
 # --- 0. Safety Cleanup ---
 umount -R /mnt &>/dev/null
 
@@ -214,9 +225,11 @@ step "Cloning system to target..."
 if [ "$TEST_MODE" = false ]; then
     rsync -aAXhW --numeric-ids --info=progress2 \
         --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
-        --exclude="/var/cache/pacman/pkg/*" \
-        --exclude="/var/log/*" \
+        --exclude={"/var/cache/*","/var/log/*","/var/tmp/*"} \
+        --exclude={"/usr/share/doc/*","/usr/share/man/*","/usr/share/info/*"} \
+        --exclude={"/usr/lib/modules/*","/usr/lib/firmware/*"} \
         --exclude="/etc/pacman.d/gnupg/*" \
+        --exclude="/root/*" \
         / /mnt/
     ok "System cloned"
 fi
@@ -265,7 +278,9 @@ if [ "$TEST_MODE" = false ]; then
     rm -f /etc/sudoers.d/01_archiso
     
     echo ":: Installing Kernel, Drivers, and Core Packages..."
-    pacman -Sy --noconfirm $KERNEL $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
+    KERNEL_HEADERS="${KERNEL}-headers"
+    [[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
+    pacman -Sy --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
     mkinitcpio -P
 
     echo ":: Configuring Grub..."
@@ -311,6 +326,39 @@ if [ "$TEST_MODE" = false ]; then
     echo ":: Enabling Services..."    
     systemctl enable NetworkManager
     systemctl enable sddm
+
+    echo ":: Cloning Dotfiles..."
+    git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
+    chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
+
+    echo ":: Stowing Dotfiles Packages..."
+    PACKAGES=(
+        bg cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
+        kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
+        themes wal xkb zsh
+    )
+    for pkg in "${PACKAGES[@]}"; do
+        sudo -u "$NEW_USER" stow --dir="/home/$NEW_USER/anarchydots" --target="/home/$NEW_USER" "$pkg" 2>/dev/null || true
+    done
+
+    echo ":: Installing Fonts..."
+    mkdir -p "/home/$NEW_USER/.local/share/fonts/"
+    cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
+    fc-cache -fv
+
+    echo ":: Configuring SDDM..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
+
+    echo ":: Configuring GRUB Theme..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"
+
+    echo ":: Enabling Additional Services..."
+    grub-mkconfig -o /boot/grub/grub.cfg
+    systemctl enable --now bluetooth
+    systemctl enable --now coolercontrold.service
+    chsh -s "$(which zsh)"
 EOF
     umount -R /mnt
     ok "Configuration complete"
@@ -319,6 +367,9 @@ fi
 echo
 header "Installation Complete!"
 echo
+
+configure_hyprmon
+
 if gum confirm "Do you want to reboot your system now?"; then
     reboot
 fi

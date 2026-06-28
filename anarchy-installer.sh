@@ -337,8 +337,15 @@ if [ "$TEST_MODE" = false ]; then
         kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
         themes wal xkb zsh
     )
+
+    echo ":: Cleaning conflicting config folders..."
     for pkg in "${PACKAGES[@]}"; do
-        sudo -u "$NEW_USER" stow --dir="/home/$NEW_USER/anarchydots" --target="/home/$NEW_USER" "$pkg" 2>/dev/null || true
+        rm -rf "/home/$NEW_USER/.config/$pkg"
+    done
+
+    cd "/home/$NEW_USER/anarchydots"
+    for pkg in "${PACKAGES[@]}"; do
+        sudo -u "$NEW_USER" stow "$pkg" || true
     done
 
     echo ":: Installing Fonts..."
@@ -358,7 +365,8 @@ if [ "$TEST_MODE" = false ]; then
     grub-mkconfig -o /boot/grub/grub.cfg
     systemctl enable --now bluetooth
     systemctl enable --now coolercontrold.service
-    chsh -s "$(which zsh)"
+    chsh -s "$(which zsh)" "$NEW_USER"
+    chsh -s "$(which zsh)" root
 EOF
     umount -R /mnt
     ok "Configuration complete"
