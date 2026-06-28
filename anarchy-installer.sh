@@ -52,8 +52,20 @@ info() {
 
 # --- Post-Install Functions ---
 
+clone_dotfiles() {
+    step "Cloning dotfiles repository..."
+    if [ -d "$HOME/anarchydots" ]; then
+        info "Dotfiles already cloned, pulling latest..."
+        git -C "$HOME/anarchydots" pull
+    else
+        git clone https://github.com/Riezz0/anarchydots "$HOME/anarchydots"
+    fi
+    ok "Dotfiles cloned to ~/anarchydots/"
+}
+
 stow_system_files() {
     step "Stowing system files..."
+    cd "$HOME/anarchydots"
     sudo stow -t /usr/local scripts
     sudo stow -t /usr/share bg
     ok "System files stowed"
@@ -61,6 +73,7 @@ stow_system_files() {
 
 stow_dotfiles() {
     step "Stowing dotfiles packages..."
+    cd "$HOME/anarchydots"
     local PACKAGES=(
         cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
         kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
@@ -391,6 +404,8 @@ fi
 if [ "$TEST_MODE" = false ]; then
     section "Post-Install Configuration"
     echo
+    
+    clone_dotfiles
     
     if gum confirm "Apply stow system files (scripts, bg)?"; then
         stow_system_files
