@@ -332,21 +332,18 @@ if [ "$TEST_MODE" = false ]; then
     echo ":: Stowing System Files..."
     cd "/home/$NEW_USER/anarchydots"
 
-    # Remove any conflicting files in /usr/local before stowing
-    find /home/$NEW_USER/anarchydots/scripts -type f | while read src; do
-        rel="${src#/home/$NEW_USER/anarchydots/scripts/}"
-        target="/usr/local/$rel"
-        [ -e "$target" ] && ! [ -L "$target" ] && rm -f "$target"
-    done
-    stow -t /usr/local scripts
+    stow_clean() {
+        local pkg="$1"
+        local target="${2:-/home/$NEW_USER}"
+        # Dry-run stow to find conflicts, then delete the blocking real files
+        stow -n -t "$target" "$pkg" 2>&1 | grep "existing target is neither" | awk '{print $NF}' | while read conflict; do
+            rm -f "$target/$conflict"
+        done
+        stow -t "$target" "$pkg"
+    }
 
-    # Remove any conflicting files in /usr/share before stowing
-    find /home/$NEW_USER/anarchydots/bg -type f | while read src; do
-        rel="${src#/home/$NEW_USER/anarchydots/bg/}"
-        target="/usr/share/$rel"
-        [ -e "$target" ] && ! [ -L "$target" ] && rm -f "$target"
-    done
-    stow -t /usr/share bg
+    stow_clean scripts /usr/local
+    stow_clean bg /usr/share
 
     echo ":: Stowing Dotfiles Packages..."
     PACKAGES=(
@@ -355,13 +352,7 @@ if [ "$TEST_MODE" = false ]; then
         themes wal xkb zsh
     )
     for pkg in "${PACKAGES[@]}"; do
-        # Remove conflicting files in $HOME before stowing each package
-        find /home/$NEW_USER/anarchydots/$pkg -type f 2>/dev/null | while read src; do
-            rel="${src#/home/$NEW_USER/anarchydots/$pkg/}"
-            target="/home/$NEW_USER/$rel"
-            [ -e "$target" ] && ! [ -L "$target" ] && rm -f "$target"
-        done
-        stow "$pkg" 2>/dev/null || true
+        stow_clean "$pkg" || true
     done
 
     echo ":: Configuring SDDM..."
