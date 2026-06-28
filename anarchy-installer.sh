@@ -50,6 +50,77 @@ info() {
     gum style --foreground "$C_SUBTEXT" "     $1"
 }
 
+# --- Post-Install Functions ---
+
+stow_system_files() {
+    step "Stowing system files..."
+    sudo stow -t /usr/local scripts
+    sudo stow -t /usr/share bg
+    ok "System files stowed"
+}
+
+stow_dotfiles() {
+    step "Stowing dotfiles packages..."
+    local PACKAGES=(
+        cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
+        kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
+        themes wal xkb zsh
+    )
+    
+    for pkg in "${PACKAGES[@]}"; do
+        if stow -v "$pkg" 2>&1 | grep -q "conflict"; then
+            info "Conflict detected for $pkg, using restore..."
+            stow -D "$pkg" 2>/dev/null || true
+            stow "$pkg"
+        else
+            stow "$pkg" 2>/dev/null || true
+        fi
+    done
+    ok "Dotfiles packages stowed"
+}
+
+configure_sddm() {
+    step "Configuring SDDM..."
+    sudo cp -r "/home/$USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
+    sudo cp -r "/home/$USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
+    ok "SDDM configured"
+}
+
+configure_grub() {
+    step "Configuring GRUB theme..."
+    sudo cp -r "/home/$USER/anarchydots/sys/grub/grub" "/etc/default/"
+    sudo cp -r "/home/$USER/anarchydots/sys/grub/grub/tokyo-night" "/usr/share/grub/themes/"
+    ok "GRUB theme applied"
+}
+
+install_nct6687d() {
+    step "Installing NCT6687D driver..."
+    git clone https://github.com/Fred78290/nct6687d "/home/$USER/mydots/nct6687d/"
+    cd "/home/$USER/mydots/nct6687d/" && make dkms/install
+    sudo cp "/home/$USER/anarchydots/sys/no_nct6683.conf" /etc/modprobe.d/
+    sudo cp "/home/$USER/anarchydots/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
+    ok "NCT6687D driver installed"
+}
+
+enable_services() {
+    step "Enabling additional services..."
+    sudo modprobe nct6687
+    sudo grub-mkconfig -o /boot/grub/grub.cfg
+    sudo systemctl enable --now bluetooth
+    sudo systemctl enable --now coolercontrold.service
+    chsh -s "$(which zsh)"
+    ok "Services enabled"
+}
+
+configure_hyprmon() {
+    step "Configuring hyprmon display settings..."
+    rm -f ~/.config/hypr/hyprmon.lua
+    rm -f ~/.config/hypr/hyprland.lua.bak.*
+    info "Launch hyprmon to setup display settings for this machine"
+    info "Settings will be saved to ~/.config/hypr/hyprmon.lua"
+    ok "Hyprmon ready for configuration"
+}
+
 # --- 0. Safety Cleanup ---
 umount -R /mnt &>/dev/null
 
@@ -316,9 +387,42 @@ EOF
     ok "Configuration complete"
 fi
 
+# --- Step 6: Post-Install Configuration ---
+if [ "$TEST_MODE" = false ]; then
+    section "Post-Install Configuration"
+    echo
+    
+    if gum confirm "Apply stow system files (scripts, bg)?"; then
+        stow_system_files
+    fi
+    
+    if gum confirm "Stow dotfiles packages?"; then
+        stow_dotfiles
+    fi
+    
+    if gum confirm "Configure SDDM theme?"; then
+        configure_sddm
+    fi
+    
+    if gum confirm "Apply GRUB theme?"; then
+        configure_grub
+    fi
+    
+    if gum confirm "Install NCT6687D driver?"; then
+        install_nct6687d
+    fi
+    
+    if gum confirm "Enable additional services (bluetooth, coolercontrol, zsh)?"; then
+        enable_services
+    fi
+fi
+
 echo
 header "Installation Complete!"
 echo
+
+configure_hyprmon
+
 if gum confirm "Do you want to reboot your system now?"; then
     reboot
 fi
