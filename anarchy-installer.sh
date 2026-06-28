@@ -331,18 +331,20 @@ if [ "$TEST_MODE" = false ]; then
 
     echo ":: Stowing System Files..."
     cd "/home/$NEW_USER/anarchydots"
-    stow -t /usr/local scripts
-    stow -t /usr/share bg
+    stow --adopt -t /usr/local scripts
+    git -C "/home/$NEW_USER/anarchydots" checkout -- .
+    stow --adopt -t /usr/share bg
+    git -C "/home/$NEW_USER/anarchydots" checkout -- .
 
     echo ":: Stowing Dotfiles Packages..."
-    local PACKAGES=(
+    PACKAGES=(
         cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
         kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
         themes wal xkb zsh
     )
     for pkg in "${PACKAGES[@]}"; do
-        stow -v "$pkg" 2>&1 | grep -q "conflict" && stow -D "$pkg" 2>/dev/null || true
-        stow "$pkg" 2>/dev/null || true
+        stow --adopt "$pkg" 2>/dev/null || true
+        git -C "/home/$NEW_USER/anarchydots" checkout -- . 2>/dev/null || true
     done
 
     echo ":: Configuring SDDM..."
