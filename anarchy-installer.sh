@@ -330,14 +330,13 @@ if [ "$TEST_MODE" = false ]; then
     chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
     echo ":: Stowing Dotfiles Packages..."
-    cd "/home/$NEW_USER/anarchydots"
     PACKAGES=(
         bg cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
         kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
         themes wal xkb zsh
     )
     for pkg in "${PACKAGES[@]}"; do
-        stow "$pkg" 2>/dev/null || true
+        sudo -u "$NEW_USER" stow --dir="/home/$NEW_USER/anarchydots" --target="/home/$NEW_USER" "$pkg" 2>/dev/null || true
     done
 
     echo ":: Configuring SDDM..."
