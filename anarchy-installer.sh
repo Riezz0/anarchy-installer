@@ -298,9 +298,11 @@ step "Cloning system to target..."
 if [ "$TEST_MODE" = false ]; then
     rsync -aAXhW --numeric-ids --info=progress2 \
         --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
-        --exclude="/var/cache/pacman/pkg/*" \
-        --exclude="/var/log/*" \
+        --exclude={"/var/cache/*","/var/log/*","/var/tmp/*"} \
+        --exclude={"/usr/share/doc/*","/usr/share/man/*","/usr/share/info/*"} \
+        --exclude={"/usr/lib/modules/*","/usr/lib/firmware/*"} \
         --exclude="/etc/pacman.d/gnupg/*" \
+        --exclude="/root/*" \
         / /mnt/
     ok "System cloned"
 fi
