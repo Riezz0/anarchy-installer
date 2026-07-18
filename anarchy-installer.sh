@@ -244,7 +244,7 @@ ROOT_UUID=$(lsblk -no UUID $ROOT_PART)
 export TARGET_DRIVE IS_EFI ROOT_UUID KERNEL CPU GPU_PKGS AUDIO_PKGS \
        AUR_HELPER NEW_USER NEW_PASS ROOT_PASS TIMEZONE NEW_HOSTNAME
 
-arch-chroot /mnt /bin/bash <<'CHEOF'
+arch-chroot /mnt /bin/bash <<CHEOF
 set -e
 
 echo ":: Initializing pacman keyring..."
@@ -357,6 +357,15 @@ fc-cache -fv
 echo ":: Configuring SDDM..."
 cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
 cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
+mkdir -p /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/default.conf <<EOF
+[General]
+DisplayServer=wayland
+
+[Wayland]
+SessionDir=/usr/share/wayland-sessions
+Session=hyprland-uwsm.desktop
+EOF
 
 echo ":: Configuring GRUB Theme..."
 cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
