@@ -56,9 +56,9 @@ configure_hyprmon() {
     echo ":: Configuring hyprmon display settings..."
     rm -f ~/.config/hypr/hyprmon.lua
     rm -f ~/.config/hypr/hyprland.lua.bak.*
-    echo "     Launch hyprmon to setup display settings for this machine"
-    echo "     Settings will be saved to ~/.config/hypr/hyprmon.lua"
-    echo "  ✔ Hyprmon ready for configuration"
+    step "Launching hyprmon — configure your monitors then quit to continue..."
+    hyprmon
+    ok "Hyprmon configuration saved"
 }
 
 # --- 0. Safety Cleanup ---
@@ -141,7 +141,7 @@ ok "GPU: ${GPU_RAW:-none}"
 
 AUDIO=$(gum choose --header "Select Audio Server" "pipewire" "pulseaudio")
 if [ "$AUDIO" = "pipewire" ]; then
-    AUDIO_PKGS="pipewire pipewire-pulse wireplumber"
+    AUDIO_PKGS="pipewire pipewire-pulse pipewire-alsa wireplumber"
 else
     AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth"
 fi
@@ -332,15 +332,15 @@ if [ "$TEST_MODE" = false ]; then
     chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
     echo ":: Stowing Dotfiles Packages..."
-    PACKAGES=(
-        bg cursors fastfetch gradience gtk3 gtk4 hyprland hypr-themes icons
-        kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi
-        themes wal xkb zsh
-    )
-    for pkg in "${PACKAGES[@]}"; do
-        sudo -u "$NEW_USER" stow --dir="/home/$NEW_USER/anarchydots" --target="/home/$NEW_USER" "$pkg" 2>/dev/null || true
-    done
+    rm -rf "/home/$NEW_USER/.config/kitty"
+    rm -rf "/home/$NEW_USER/.config/hyprland"
+    rm -rf "/home/$NEW_USER/.icons"
+    rm -rf "/home/$NEW_USER/.themes"
+    rm -rf "/home/$NEW_USER/.local"
 
+    cd "/home/$NEW_USER/anarchydots"
+    sudo -u "$NEW_USER" stow --restow bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh -t "/home/$NEW_USER"
+    sudo -u "$NEW_USER" stow --restow cursors -t "/home/$NEW_USER"
     echo ":: Installing Fonts..."
     mkdir -p "/home/$NEW_USER/.local/share/fonts/"
     cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
@@ -358,7 +358,8 @@ if [ "$TEST_MODE" = false ]; then
     grub-mkconfig -o /boot/grub/grub.cfg
     systemctl enable --now bluetooth
     systemctl enable --now coolercontrold.service
-    chsh -s "$(which zsh)"
+    chsh -s "$(which zsh)" "$NEW_USER"
+    chsh -s "$(which zsh)" root
 EOF
     umount -R /mnt
     ok "Configuration complete"
