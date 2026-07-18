@@ -139,9 +139,9 @@ ok "GPU: ${GPU_RAW:-none}"
 
 AUDIO=$(gum choose --header "Select Audio Server" "pipewire" "pulseaudio")
 if [ "$AUDIO" = "pipewire" ]; then
-    AUDIO_PKGS="pipewire pipewire-pulse pipewire-alsa wireplumber pipewire-jack pipewire-zeroconf"
+    AUDIO_PKGS="pipewire pipewire-pulse pipewire-alsa wireplumber"
 else
-    AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth pulseaudio-zeroconf"
+    AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth"
 fi
 ok "Audio: $AUDIO"
 
@@ -212,28 +212,23 @@ if [ "$IS_EFI" = true ]; then mount "$EFI_PART" /mnt/boot; fi
 ok "Subvolumes mounted"
 echo
 
-# --- Step 4: Capture Live Packages (before pacstrap) ---
-LIVE_PKGLIST="/tmp/live-packages-$$.txt"
-step "Capturing live environment packages..."
-pacman -Qq 2>/dev/null | sort > "$LIVE_PKGLIST"
-ok "Captured $(wc -l < "$LIVE_PKGLIST") packages"
+# --- Step 4: Cloning System ---
+step "Cloning system to target..."
+rsync -aAXhW --numeric-ids --info=progress2 \
+    --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
+    --exclude={"/var/cache/*","/var/log/*","/var/tmp/*"} \
+    --exclude={"/usr/share/doc/*","/usr/share/man/*","/usr/share/info/*"} \
+    --exclude={"/usr/lib/modules/*","/usr/lib/firmware/*"} \
+    --exclude="/etc/pacman.d/gnupg/*" \
+    --exclude="/root/*" \
+    / /mnt/
+ok "System cloned"
 echo
 
-# --- Step 5: Pacstrap ---
-KERNEL_HEADERS="${KERNEL}-headers"
-[[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
-
-step "Installing base system with pacstrap..."
-pacstrap /mnt base sudo bluez zsh linux linux-firmware $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS btrfs-progs grub nano git stow networkmanager sddm $([ "$IS_EFI" = true ] && echo "efibootmgr")
-ok "Base system installed"
-echo
-
-# --- Step 6: Configuration (Chroot) ---
+# --- Step 5: Configuration (Chroot) ---
 step "Configuring target system..."
 genfstab -U /mnt >> /mnt/etc/fstab
 cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
-
-cp "$LIVE_PKGLIST" /mnt/tmp/live-packages.txt
 
 partprobe $TARGET_DRIVE
 udevadm settle
@@ -261,22 +256,38 @@ arch-chroot /mnt /bin/bash <<'CHEOF'
 set -e
 source /mnt/.install_env
 
-echo ":: Initializing pacman keyring..."
+echo ":: Repairing cloned pacman database..."
+find /var/lib/pacman/local/ -type f -name "desc" -exec sed -i '/^%INSTALLED_DB%/,/^$/d' {} +
+
 pacman-key --init
 pacman-key --populate archlinux
 
-echo ":: Configuring pacman..."
-sed -i 's/^#ParallelDownloads/ParallelDownloads/' /etc/pacman.conf
-sed -i '/\[multilib\]/,/Include/s/^#//' /etc/pacman.conf
-pacman -Sy
+echo ":: Cleaning boot config..."
+pacman -Rns --noconfirm archiso 2>/dev/null || true
+rm -rf /etc/mkinitcpio.conf.d
+rm -f /etc/mkinitcpio.d/*.preset
+rm -f /boot/vmlinuz* /boot/initramfs*
 
-echo ":: Configuring initramfs..."
-cat > /etc/mkinitcpio.conf <<MKCONF
-MODULES=(btrfs)
-BINARIES=()
-FILES=()
-HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
-MKCONF
+echo "MODULES=(btrfs)" > /etc/mkinitcpio.conf
+echo "BINARIES=()" >> /etc/mkinitcpio.conf
+echo "FILES=()" >> /etc/mkinitcpio.conf
+echo "HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)" >> /etc/mkinitcpio.conf
+
+echo ":: Removing Live User configs..."
+userdel -f -r liveuser 2>/dev/null || true
+rm -rf /etc/sddm.conf.d/*
+if [ -f /etc/sddm.conf ]; then
+    sed -i '/Autologin/d' /etc/sddm.conf
+    sed -i '/User=liveuser/d' /etc/sddm.conf
+fi
+
+rm -f /etc/sudoers.d/g_wheel
+rm -f /etc/sudoers.d/01_archiso
+
+echo ":: Installing Kernel, Drivers, and Core Packages..."
+KERNEL_HEADERS="${KERNEL}-headers"
+[[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
+pacman -Sy --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
 mkinitcpio -P
 
 echo ":: Configuring Grub..."
@@ -292,21 +303,8 @@ grub-mkconfig -o /boot/grub/grub.cfg
 
 echo ":: Setting System Identity..."
 echo "$NEW_HOSTNAME" > /etc/hostname
-echo "127.0.0.1   localhost" > /etc/hosts
-echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
 ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
 hwclock --systohc
-
-sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
-locale-gen
-echo "LANG=en_US.UTF-8" > /etc/locale.conf
-
-echo ":: Configuring locale and keymap..."
-localectl set-keymap us
-
-echo ":: Enabling services..."
-systemctl enable NetworkManager
-systemctl enable sddm
 
 echo ":: Creating Users..."
 printf '%s\n' "root:$ROOT_PASS" | chpasswd
@@ -331,43 +329,24 @@ if [ "$AUR_HELPER" != "none" ]; then
     "
 fi
 
-echo ":: Cloning apps from live environment..."
-if [ -f /tmp/live-packages.txt ]; then
-    EXTRA_PKGS=$(comm -23 <(sort /tmp/live-packages.txt) <(pacman -Qq | sort) | tr '\n' ' ')
-    if [ -n "$EXTRA_PKGS" ]; then
-        if [ "$AUR_HELPER" != "none" ]; then
-            sudo -u "$NEW_USER" "$AUR_HELPER" -S --needed --noconfirm $EXTRA_PKGS || \
-            pacman -S --needed --noconfirm $EXTRA_PKGS || true
-        else
-            pacman -S --needed --noconfirm $EXTRA_PKGS || true
-        fi
-    fi
-    rm -f /tmp/live-packages.txt
-fi
+echo ":: Enabling Services..."
+systemctl enable NetworkManager
+systemctl enable sddm
 
 echo ":: Cloning Dotfiles..."
 git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
 chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
-echo ":: Verifying Stow Packages..."
-STOW_PKGS="bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh cursors"
-MISSING=""
-for pkg in $STOW_PKGS; do
-    if ! pacman -Qi "$pkg" &>/dev/null; then
-        MISSING="$MISSING $pkg"
-    fi
-done
-if [ -n "$MISSING" ]; then
-    echo "  ⚠ Missing packages:$MISSING"
-    echo "  Installing missing packages..."
-    pacman -S --needed --noconfirm $MISSING || true
-fi
-
 echo ":: Stowing Dotfiles Packages..."
+rm -rf "/home/$NEW_USER/.config/kitty"
+rm -rf "/home/$NEW_USER/.config/hyprland"
+rm -rf "/home/$NEW_USER/.icons"
+rm -rf "/home/$NEW_USER/.themes"
+rm -rf "/home/$NEW_USER/.local"
+
 cd "/home/$NEW_USER/anarchydots"
 sudo -u "$NEW_USER" stow --restow bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh -t "/home/$NEW_USER"
 sudo -u "$NEW_USER" stow --restow cursors -t "/home/$NEW_USER"
-
 echo ":: Installing Fonts..."
 mkdir -p "/home/$NEW_USER/.local/share/fonts/"
 cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
@@ -376,22 +355,13 @@ fc-cache -fv
 echo ":: Configuring SDDM..."
 cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
 cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
-mkdir -p /etc/sddm.conf.d
-cat > /etc/sddm.conf.d/default.conf <<EOF
-[General]
-DisplayServer=wayland
-
-[Wayland]
-SessionDir=/usr/share/wayland-sessions
-Session=hyprland-uwsm.desktop
-EOF
 
 echo ":: Configuring GRUB Theme..."
 cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
 cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"
-grub-mkconfig -o /boot/grub/grub.cfg
 
 echo ":: Enabling Additional Services..."
+grub-mkconfig -o /boot/grub/grub.cfg
 systemctl enable bluetooth 2>/dev/null || true
 systemctl enable coolercontrold.service 2>/dev/null || true
 chsh -s /bin/zsh "$NEW_USER"
@@ -400,7 +370,6 @@ chsh -s /bin/zsh root
 rm -f /mnt/.install_env
 CHEOF
 umount -R /mnt
-rm -f "$LIVE_PKGLIST"
 ok "Configuration complete"
 
 echo
