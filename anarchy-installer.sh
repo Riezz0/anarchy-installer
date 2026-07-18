@@ -330,6 +330,20 @@ echo ":: Cloning Dotfiles..."
 git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
 chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
+echo ":: Verifying Stow Packages..."
+STOW_PKGS="bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh cursors"
+MISSING=""
+for pkg in $STOW_PKGS; do
+    if ! pacman -Qi "$pkg" &>/dev/null; then
+        MISSING="$MISSING $pkg"
+    fi
+done
+if [ -n "$MISSING" ]; then
+    echo "  ⚠ Missing packages:$MISSING"
+    echo "  Installing missing packages..."
+    pacman -S --needed --noconfirm $MISSING || true
+fi
+
 echo ":: Stowing Dotfiles Packages..."
 cd "/home/$NEW_USER/anarchydots"
 sudo -u "$NEW_USER" stow --restow bg fastfetch gradience gtk3 gtk4 hypr-themes hyprland kitty kvantum neovim pypr pywal qt5 qt6 quickshell rofi wal xkb zsh -t "/home/$NEW_USER"
