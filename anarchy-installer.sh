@@ -287,6 +287,13 @@ rm -f /etc/sudoers.d/01_archiso
 echo ":: Installing Kernel, Drivers, and Core Packages..."
 KERNEL_HEADERS="${KERNEL}-headers"
 [[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
+
+if [ "$AUDIO" = "pipewire" ]; then
+    pacman -Rns --noconfirm pulseaudio pulseaudio-bluetooth pulseaudio-zeroconf pulseaudio-alsa 2>/dev/null || true
+else
+    pacman -Rns --noconfirm pipewire pipewire-pulse pipewire-alsa pipewire-jack pipewire-zeroconf wireplumber 2>/dev/null || true
+fi
+
 pacman -Sy --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
 mkinitcpio -P
 
