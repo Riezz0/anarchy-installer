@@ -224,7 +224,7 @@ KERNEL_HEADERS="${KERNEL}-headers"
 [[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
 
 step "Installing base system with pacstrap..."
-pacstrap /mnt base sudo bluez linux linux-firmware $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS btrfs-progs grub nano git stow networkmanager sddm $([ "$IS_EFI" = true ] && echo "efibootmgr")
+pacstrap /mnt base sudo bluez zsh linux linux-firmware $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS btrfs-progs grub nano git stow networkmanager sddm $([ "$IS_EFI" = true ] && echo "efibootmgr")
 ok "Base system installed"
 echo
 
@@ -352,8 +352,8 @@ grub-mkconfig -o /boot/grub/grub.cfg
 echo ":: Enabling Additional Services..."
 systemctl enable bluetooth 2>/dev/null || true
 systemctl enable coolercontrold.service 2>/dev/null || true
-chsh -s "$(which zsh)" "$NEW_USER"
-chsh -s "$(which zsh)" root
+chsh -s /bin/zsh "$NEW_USER"
+chsh -s /bin/zsh root
 CHEOF
 umount -R /mnt
 rm -f "$LIVE_PKGLIST"
