@@ -141,7 +141,7 @@ ok "GPU: ${GPU_RAW:-none}"
 
 AUDIO=$(gum choose --header "Select Audio Server" "pipewire" "pulseaudio")
 if [ "$AUDIO" = "pipewire" ]; then
-    AUDIO_PKGS="pipewire pipewire-pulse wireplumber"
+    AUDIO_PKGS="pipewire pipewire-pulse pipewire-alsa wireplumber"
 else
     AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth"
 fi
