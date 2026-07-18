@@ -337,7 +337,14 @@ echo ":: Stowing Dotfiles Packages..."
 rm -rf "/home/$NEW_USER/.config"
 rm -rf "/home/$NEW_USER/.icons"
 rm -rf "/home/$NEW_USER/.themes"
+if [ -d "/home/$NEW_USER/.local/share/themes" ]; then
+    cp -a "/home/$NEW_USER/.local/share/themes" "/tmp/user_themes_backup"
+fi
 rm -rf "/home/$NEW_USER/.local"
+if [ -d "/tmp/user_themes_backup" ]; then
+    mkdir -p "/home/$NEW_USER/.local/share"
+    mv "/tmp/user_themes_backup" "/home/$NEW_USER/.local/share/themes"
+fi
 rm -rf "/home/$NEW_USER/.oh-my-zsh"
 rm -rf "/home/$NEW_USER/.cache"
 rm -f "/home/$NEW_USER/.zshrc"
