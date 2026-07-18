@@ -147,9 +147,6 @@ ok "Audio: $AUDIO"
 
 AUR_HELPER=$(gum choose --header "Select AUR Helper" "yay" "paru" "pikaur" "none")
 ok "AUR Helper: $AUR_HELPER"
-
-CLONE_APPS=$(gum confirm --affirmative "Yes" --negative "No" "  Clone installed apps from live environment?")
-ok "Clone Apps: $CLONE_APPS"
 echo
 
 # --- 6. Summary ---
@@ -217,11 +214,9 @@ echo
 
 # --- Step 4: Capture Live Packages (before pacstrap) ---
 LIVE_PKGLIST="/tmp/live-packages-$$.txt"
-if [ "$CLONE_APPS" = "true" ]; then
-    step "Capturing live environment packages..."
-    pacman -Qq 2>/dev/null | sort > "$LIVE_PKGLIST"
-    ok "Captured $(wc -l < "$LIVE_PKGLIST") packages"
-fi
+step "Capturing live environment packages..."
+pacman -Qq 2>/dev/null | sort > "$LIVE_PKGLIST"
+ok "Captured $(wc -l < "$LIVE_PKGLIST") packages"
 echo
 
 # --- Step 5: Pacstrap ---
@@ -229,7 +224,7 @@ KERNEL_HEADERS="${KERNEL}-headers"
 [[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
 
 step "Installing base system with pacstrap..."
-pacstrap /mnt base sudo linux linux-firmware $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS btrfs-progs grub nano git stow networkmanager sddm $([ "$IS_EFI" = true ] && echo "efibootmgr")
+pacstrap /mnt base sudo bluez linux linux-firmware $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS btrfs-progs grub nano git stow networkmanager sddm $([ "$IS_EFI" = true ] && echo "efibootmgr")
 ok "Base system installed"
 echo
 
@@ -238,9 +233,7 @@ step "Configuring target system..."
 genfstab -U /mnt >> /mnt/etc/fstab
 cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
 
-if [ "$CLONE_APPS" = "true" ]; then
-    cp "$LIVE_PKGLIST" /mnt/tmp/live-packages.txt
-fi
+cp "$LIVE_PKGLIST" /mnt/tmp/live-packages.txt
 
 partprobe $TARGET_DRIVE
 udevadm settle
@@ -249,8 +242,7 @@ ROOT_UUID=$(lsblk -no UUID $ROOT_PART)
 
 # --- Export variables for chroot ---
 export TARGET_DRIVE IS_EFI ROOT_UUID KERNEL CPU GPU_PKGS AUDIO_PKGS \
-       AUR_HELPER NEW_USER NEW_PASS ROOT_PASS TIMEZONE NEW_HOSTNAME \
-       CLONE_APPS
+       AUR_HELPER NEW_USER NEW_PASS ROOT_PASS TIMEZONE NEW_HOSTNAME
 
 arch-chroot /mnt /bin/bash <<'CHEOF'
 set -e
@@ -325,16 +317,13 @@ if [ "$AUR_HELPER" != "none" ]; then
     "
 fi
 
-if [ "$CLONE_APPS" = "true" ]; then
-    echo ":: Cloning apps from live environment..."
-    if [ -f /tmp/live-packages.txt ]; then
-        # Filter out already-installed base packages
-        EXTRA_PKGS=$(comm -23 <(sort /tmp/live-packages.txt) <(pacman -Qq | sort) | tr '\n' ' ')
-        if [ -n "$EXTRA_PKGS" ]; then
-            pacman -S --needed --noconfirm $EXTRA_PKGS || true
-        fi
-        rm -f /tmp/live-packages.txt
+echo ":: Cloning apps from live environment..."
+if [ -f /tmp/live-packages.txt ]; then
+    EXTRA_PKGS=$(comm -23 <(sort /tmp/live-packages.txt) <(pacman -Qq | sort) | tr '\n' ' ')
+    if [ -n "$EXTRA_PKGS" ]; then
+        pacman -S --needed --noconfirm $EXTRA_PKGS || true
     fi
+    rm -f /tmp/live-packages.txt
 fi
 
 echo ":: Cloning Dotfiles..."
@@ -361,8 +350,8 @@ cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes
 grub-mkconfig -o /boot/grub/grub.cfg
 
 echo ":: Enabling Additional Services..."
-systemctl enable --now bluetooth
-systemctl enable --now coolercontrold.service 2>/dev/null || true
+systemctl enable bluetooth 2>/dev/null || true
+systemctl enable coolercontrold.service 2>/dev/null || true
 chsh -s "$(which zsh)" "$NEW_USER"
 chsh -s "$(which zsh)" root
 CHEOF
