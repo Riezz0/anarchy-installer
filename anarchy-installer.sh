@@ -240,12 +240,26 @@ udevadm settle
 sleep 2
 ROOT_UUID=$(lsblk -no UUID $ROOT_PART)
 
-# --- Export variables for chroot ---
-export TARGET_DRIVE IS_EFI ROOT_UUID KERNEL CPU GPU_PKGS AUDIO_PKGS \
-       AUR_HELPER NEW_USER NEW_PASS ROOT_PASS TIMEZONE NEW_HOSTNAME
+# --- Write env vars to file (avoids heredoc expansion mangling passwords) ---
+cat > /mnt/.install_env <<ENVEOF
+TARGET_DRIVE="$TARGET_DRIVE"
+IS_EFI=$IS_EFI
+ROOT_UUID="$ROOT_UUID"
+KERNEL="$KERNEL"
+CPU="$CPU"
+GPU_PKGS="$GPU_PKGS"
+AUDIO_PKGS="$AUDIO_PKGS"
+AUR_HELPER="$AUR_HELPER"
+NEW_USER="$NEW_USER"
+TIMEZONE="$TIMEZONE"
+NEW_HOSTNAME="$NEW_HOSTNAME"
+ENVEOF
+printf 'ROOT_PASS=%s\n' "$ROOT_PASS" >> /mnt/.install_env
+printf 'NEW_PASS=%s\n' "$NEW_PASS" >> /mnt/.install_env
 
-arch-chroot /mnt /bin/bash <<CHEOF
+arch-chroot /mnt /bin/bash <<'CHEOF'
 set -e
+source /mnt/.install_env
 
 echo ":: Initializing pacman keyring..."
 pacman-key --init
@@ -295,9 +309,9 @@ systemctl enable NetworkManager
 systemctl enable sddm
 
 echo ":: Creating Users..."
-echo "root:$ROOT_PASS" | chpasswd
+printf '%s\n' "root:$ROOT_PASS" | chpasswd
 useradd -m -G wheel -s /bin/bash "$NEW_USER"
-echo "$NEW_USER:$NEW_PASS" | chpasswd
+printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
 sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 if [ "$AUR_HELPER" != "none" ]; then
@@ -321,7 +335,12 @@ echo ":: Cloning apps from live environment..."
 if [ -f /tmp/live-packages.txt ]; then
     EXTRA_PKGS=$(comm -23 <(sort /tmp/live-packages.txt) <(pacman -Qq | sort) | tr '\n' ' ')
     if [ -n "$EXTRA_PKGS" ]; then
-        pacman -S --needed --noconfirm $EXTRA_PKGS || true
+        if [ "$AUR_HELPER" != "none" ]; then
+            sudo -u "$NEW_USER" "$AUR_HELPER" -S --needed --noconfirm $EXTRA_PKGS || \
+            pacman -S --needed --noconfirm $EXTRA_PKGS || true
+        else
+            pacman -S --needed --noconfirm $EXTRA_PKGS || true
+        fi
     fi
     rm -f /tmp/live-packages.txt
 fi
@@ -377,6 +396,8 @@ systemctl enable bluetooth 2>/dev/null || true
 systemctl enable coolercontrold.service 2>/dev/null || true
 chsh -s /bin/zsh "$NEW_USER"
 chsh -s /bin/zsh root
+
+rm -f /mnt/.install_env
 CHEOF
 umount -R /mnt
 rm -f "$LIVE_PKGLIST"
