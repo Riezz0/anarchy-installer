@@ -254,7 +254,7 @@ printf 'NEW_PASS=%s\n' "$NEW_PASS" >> /mnt/.install_env
 
 arch-chroot /mnt /bin/bash <<'CHEOF'
 set -e
-source /mnt/.install_env
+source /.install_env
 
 echo ":: Repairing cloned pacman database..."
 find /var/lib/pacman/local/ -type f -name "desc" -exec sed -i '/^%INSTALLED_DB%/,/^$/d' {} +
@@ -367,7 +367,7 @@ systemctl enable coolercontrold.service 2>/dev/null || true
 chsh -s /bin/zsh "$NEW_USER"
 chsh -s /bin/zsh root
 
-rm -f /mnt/.install_env
+rm -f /.install_env
 CHEOF
 umount -R /mnt
 ok "Configuration complete"
