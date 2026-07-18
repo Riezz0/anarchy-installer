@@ -344,6 +344,7 @@ rm -rf "/home/$NEW_USER/.local"
 if [ -d "/tmp/user_themes_backup" ]; then
     mkdir -p "/home/$NEW_USER/.local/share"
     mv "/tmp/user_themes_backup" "/home/$NEW_USER/.local/share/themes"
+    chown -R "$NEW_USER:users" "/home/$NEW_USER/.local"
 fi
 rm -rf "/home/$NEW_USER/.oh-my-zsh"
 rm -rf "/home/$NEW_USER/.cache"
