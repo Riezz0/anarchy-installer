@@ -346,7 +346,7 @@ cd "/home/$NEW_USER/anarchydots"
 rm -rf /usr/local/bin
 sudo stow --restow scripts -t /usr/local
 ls -la /usr/local/bin/ | head -5
-ok "Scripts stowed"
+echo "  ✔ Scripts stowed"
 sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
 echo ":: Installing Fonts..."
 mkdir -p "/home/$NEW_USER/.local/share/fonts/"

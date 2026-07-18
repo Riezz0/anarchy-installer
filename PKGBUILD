@@ -1,6 +1,6 @@
 # Maintainer: Riezz0 <https://github.com/Riezz0>
 pkgname=anarchy-installer
-pkgver=0.0.58
+pkgver=0.0.59
 pkgrel=1
 pkgdesc="Interactive Arch Linux + Hyprland (UWSM) + SDDM installer powered by gum"
 arch=('any')
