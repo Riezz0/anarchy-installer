@@ -229,7 +229,7 @@ KERNEL_HEADERS="${KERNEL}-headers"
 [[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
 
 step "Installing base system with pacstrap..."
-pacstrap /mnt base linux linux-firmware $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS btrfs-progs grub nano git stow networkmanager sddm $([ "$IS_EFI" = true ] && echo "efibootmgr")
+pacstrap /mnt base sudo linux linux-firmware $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS btrfs-progs grub nano git stow networkmanager sddm $([ "$IS_EFI" = true ] && echo "efibootmgr")
 ok "Base system installed"
 echo
 
