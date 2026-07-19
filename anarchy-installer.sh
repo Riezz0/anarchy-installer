@@ -365,6 +365,11 @@ echo ":: Configuring SDDM..."
 cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
 cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
 
+# One-time setup (run with sudo)
+mkdir -p /var/local/sddm-wallpaper
+chown "$NEW_USER:sddm" /var/local/sddm-wallpaper
+chmod 775 /var/local/sddm-wallpaper
+
 echo ":: Configuring GRUB Theme..."
 cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
 cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"

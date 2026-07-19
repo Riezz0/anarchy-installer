@@ -50,17 +50,6 @@ info() {
     gum style --foreground "$C_SUBTEXT" "     $1"
 }
 
-# --- Post-Install Functions ---
-
-configure_hyprmon() {
-    echo ":: Configuring hyprmon display settings..."
-    rm -f ~/.config/hypr/hyprmon.lua
-    rm -f ~/.config/hypr/hyprland.lua.bak.*
-    step "Launching hyprmon — configure your monitors then quit to continue..."
-    hyprmon
-    ok "Hyprmon configuration saved"
-}
-
 # --- 0. Safety Cleanup ---
 umount -R /mnt &>/dev/null
 
@@ -348,7 +337,15 @@ echo ":: Stowing Dotfiles Packages..."
 rm -rf "/home/$NEW_USER/.config"
 rm -rf "/home/$NEW_USER/.icons"
 rm -rf "/home/$NEW_USER/.themes"
+if [ -d "/home/$NEW_USER/.local/share/themes" ]; then
+    cp -a "/home/$NEW_USER/.local/share/themes" "/tmp/user_themes_backup"
+fi
 rm -rf "/home/$NEW_USER/.local"
+if [ -d "/tmp/user_themes_backup" ]; then
+    mkdir -p "/home/$NEW_USER/.local/share"
+    mv "/tmp/user_themes_backup" "/home/$NEW_USER/.local/share/themes"
+    chown -R "$NEW_USER:users" "/home/$NEW_USER/.local"
+fi
 rm -rf "/home/$NEW_USER/.oh-my-zsh"
 rm -rf "/home/$NEW_USER/.cache"
 rm -f "/home/$NEW_USER/.zshrc"
@@ -356,6 +353,8 @@ rm -f "/home/$NEW_USER/.zshrc"
 cd "/home/$NEW_USER/anarchydots"
 rm -rf /usr/local/bin
 sudo stow --restow scripts -t /usr/local
+ls -la /usr/local/bin/ | head -5
+echo "  ✔ Scripts stowed"
 sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
 echo ":: Installing Fonts..."
 mkdir -p "/home/$NEW_USER/.local/share/fonts/"
@@ -385,8 +384,7 @@ ok "Configuration complete"
 echo
 header "Installation Complete!"
 echo
-
-configure_hyprmon
+info "Log in and run 'hyprmon' to configure your monitors."
 
 if gum confirm "Do you want to reboot your system now?"; then
     reboot
