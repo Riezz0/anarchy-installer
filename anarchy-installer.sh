@@ -352,7 +352,11 @@ rm -f "/home/$NEW_USER/.zshrc"
 
 cd "/home/$NEW_USER/anarchydots"
 rm -rf /usr/local/bin
-sudo stow --restow scripts -t /usr/local
+
+#1
+sudo mkdir -p /usr/local/
+#2
+sudo stow -t /usr/local scripts
 ls -la /usr/local/bin/ | head -5
 echo "  ✔ Scripts stowed"
 sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
