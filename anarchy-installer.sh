@@ -367,7 +367,7 @@ fc-cache -fv
 
 echo ":: Configuring SDDM..."
 cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
-cp -r "/home/$NEW_USER/anarchydots/sys/sddm/tokyo-night/" "/usr/share/sddm/themes/"
+cp -r "/home/$NEW_USER/anarchydots/sys/sddm/anarchy-sddm/" "/usr/share/sddm/themes/"
 
 # One-time setup (run with sudo)
 mkdir -p /var/local/sddm-wallpaper
@@ -382,6 +382,7 @@ echo ":: Enabling Additional Services..."
 grub-mkconfig -o /boot/grub/grub.cfg
 systemctl enable bluetooth 2>/dev/null || true
 systemctl enable coolercontrold.service 2>/dev/null || true
+sudo -u "$NEW_USER" arch-update --tray --enable
 chsh -s /bin/zsh "$NEW_USER"
 chsh -s /bin/zsh root
 
