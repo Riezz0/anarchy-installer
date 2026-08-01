@@ -28,6 +28,15 @@ success() { echo -e "${C_GREEN}::${C_RESET} $1"; }
 error()   { echo -e "${C_RED}::${C_RESET} $1"; }
 fatal()   { error "$1"; exit 1; }
 
+header() {
+    gum style \
+        --border double \
+        --align center \
+        --foreground "$C_BLUE" \
+        --border-foreground "$C_BLUE" \
+        "$1"
+}
+
 # ------------------------------------------------------------
 #  Header
 # ------------------------------------------------------------
