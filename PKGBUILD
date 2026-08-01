@@ -2,7 +2,7 @@
 pkgname=anarchy-installer
 pkgver=0.0.65
 pkgrel=1
-pkgdesc="Interactive Arch Linux + Hyprland (UWSM) + SDDM installer powered by gum"
+pkgdesc="Offline Arch Linux + Hyprland (UWSM) + SDDM installer with local pacman repo"
 arch=('any')
 url="https://github.com/Riezz0/anarchy-installer"
 license=('GPL-3.0-or-later')
