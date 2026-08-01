@@ -240,21 +240,30 @@ fi
 # ------------------------------------------------------------
 info "Configuring pacman for local repo..."
 
-REPO_SRC="/repo"
-if [[ ! -d "$REPO_SRC" ]]; then
-    fatal "Local repo not found at $REPO_SRC. Cannot proceed with offline install."
+# Check a few common locations where the repo might live on the ISO
+if [[ -d "/repo" ]]; then
+    REPO_SRC="/repo"
+elif [[ -d "$(dirname "$0")/repo" ]]; then
+    REPO_SRC="$(dirname "$0")/repo"
+elif [[ -d "./repo" ]]; then
+    REPO_SRC="./repo"
+else
+    fatal "Local repo not found. Cannot proceed with offline install."
 fi
 
 ORIG_CONF="/etc/pacman.conf"
+cp "$ORIG_CONF" "${ORIG_CONF}.bak"
+
 TEMP_CONF="/tmp/pacman-offline.conf"
-cp "$ORIG_CONF" "$TEMP_CONF"
 
-cat >> "$TEMP_CONF" <<EOF
-
-[anarchy]
+cat > "$TEMP_CONF" <<EOF
+[anarchy-repo]
 SigLevel = Optional TrustAll
-Server = file:///repo/x86_64
+Server = file://$REPO_SRC/x86_64
+
 EOF
+
+cat "$ORIG_CONF" >> "$TEMP_CONF"
 
 cp "$TEMP_CONF" "$ORIG_CONF"
 rm -f "$TEMP_CONF"
