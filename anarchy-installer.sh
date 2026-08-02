@@ -300,6 +300,16 @@ PACKAGES=(
     rsync
     stow
     arch-update
+    hyprland
+    uwsm
+    xdg-desktop-portal-hyprland
+    xdg-utils
+    xdg-user-dirs
+    polkit
+    qt5-wayland
+    qt6-wayland
+    xorg-xwayland
+    xdg-terminal-exec
 )
 
 [[ "$CPU" != "none" ]] && PACKAGES+=("$CPU")
