@@ -292,6 +292,7 @@ PACKAGES=(
     sudo
     zsh
     rsync
+    stow
     arch-update
 )
 
