@@ -327,6 +327,9 @@ if [ "$AUR_HELPER" != "none" ]; then
     echo ":: Installing AUR Helper: $AUR_HELPER"
     pacman -S --needed --noconfirm base-devel git
 
+    # Temporarily enable NOPASSWD for wheel so makepkg -si can run pacman
+    sed -i 's/%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
+
     sudo -u "$NEW_USER" bash -c "
         cd /home/$NEW_USER
         case '$AUR_HELPER' in
@@ -338,6 +341,9 @@ if [ "$AUR_HELPER" != "none" ]; then
         cd ..
         rm -rf *build* *bin*
     "
+
+    # Revert to password-based sudo
+    sed -i 's/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 fi
 
 echo ":: Enabling Services..."
