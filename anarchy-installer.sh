@@ -298,6 +298,74 @@ PACKAGES=(
     qt5-wayland
     qt6-wayland
     xorg-xwayland
+    kitty
+    neovim
+    nautilus
+    rofi
+    hypridle
+    hyprlock
+    hyprmon-bin
+    hyprpicker
+    pyprland
+    oh-my-zsh-git
+    gradience-git
+    goverlay-git
+    nwg-displays
+    nwg-look
+    kvantum-qt6-git
+    adw-gtk-theme-git
+    eza
+    blueman
+    bluez
+    bluez-utils
+    swaync
+    vesktop-bin
+    vencord-bin
+    inter-font
+    ttf-jetbrains-mono-nerd
+    ttf-font-awesome
+    otf-font-awesome
+    python-pywal16
+    python-pywalfox
+    python-gobject
+    python-cssutils
+    python-libsass
+    python-anyascii
+    python-material-color-utilities
+    python-yapsy-git
+    awww
+    wlsunset
+    grim-git
+    slurp-git
+    wf-recorder-git
+    vkbasalt
+    xfce-polkit
+    zsh-autocomplete
+    zsh-autosuggestions
+    zsh-syntax-highlighting
+    zsh-fast-syntax-highlighting
+    zsh-autoswitch-virtualenv-git
+    qt5-graphicaleffects
+    qt5-imageformats
+    qt5-multimedia
+    qt5-quickcontrols
+    qt5-quickcontrols2
+    qt5-styleplugins
+    qt5-svg
+    qt6-base
+    qt6-declarative
+    qt6-imageformats
+    qt6-multimedia
+    qt6-svg
+    gtk2
+    mesa-utils
+    nautilus-admin-gtk4
+    nautilus-open-any-terminal-git
+    coolercontrol
+    coolercontrold
+    plymouth
+    vlc
+    vlc-plugins-all
     xdg-terminal-exec
 )
 
@@ -309,7 +377,7 @@ if [[ "$IS_EFI" == true ]]; then
     PACKAGES+=(efibootmgr)
 fi
 
-pacstrap -K /mnt "${PACKAGES[@]}"
+pacstrap -K -C /etc/pacman.conf /mnt "${PACKAGES[@]}"
 
 # Restore original pacman.conf on ISO
 cp "$ORIG_CONF.bak" "$ORIG_CONF" 2>/dev/null || true
