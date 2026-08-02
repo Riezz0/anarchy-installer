@@ -560,29 +560,15 @@ class InstallPage(Adw.NavigationPage):
 
         self._proc = None
         self._watch_id = None
-        self._line_buffer = ""
 
     def _feed_text(self, text):
         if HAS_VTE:
             self.terminal.feed(GLib.Bytes(text.encode("utf-8", errors="replace")), -1)
-            return
-        buf = self.terminal.get_buffer()
-        for char in text:
-            if char == "\r":
-                self._line_buffer = ""
-            elif char == "\x1b":
-                pass
-            else:
-                self._line_buffer += char
-            if char == "\n":
-                end = buf.get_end_iter()
-                buf.insert(end, self._line_buffer, -1)
-                self._line_buffer = ""
-        if self._line_buffer:
-            end = buf.get_end_iter()
-            buf.insert(end, self._line_buffer, -1)
-            self._line_buffer = ""
-        self.terminal.scroll_mark_onscreen(buf.get_insert())
+        else:
+            buf = self.terminal.get_buffer()
+            end_iter = buf.get_end_iter()
+            buf.insert(end_iter, text, -1)
+            self.terminal.scroll_mark_onscreen(buf.get_insert())
 
     def apply_vte_palette(self, palette):
         if not HAS_VTE:
