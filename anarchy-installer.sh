@@ -264,18 +264,9 @@ cp "$ORIG_CONF" "${ORIG_CONF}.bak"
 
 sed -i '/\[anarchy-repo\]/,/^$/d' "$ORIG_CONF"
 
-TEMP_CONF="/tmp/pacman-offline.conf"
+sed -i '/^\[core\]/i \
+[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file:///'"$REPO_SRC"'/x86_64\n' "$ORIG_CONF"
 
-cat > "$TEMP_CONF" <<EOF
-[anarchy-repo]
-SigLevel = Optional TrustAll
-Server = file:///$REPO_SRC/x86_64
-
-EOF
-
-cat "$ORIG_CONF" >> "$TEMP_CONF"
-
-cp "$TEMP_CONF" "$ORIG_CONF"
 rm -f "$TEMP_CONF"
 
 pacman -Sy
