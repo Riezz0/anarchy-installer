@@ -593,9 +593,20 @@ class InstallPage(Adw.NavigationPage):
             '<span size="large" weight="bold">Installing System...</span>')
 
         env_lines = []
-        for k, v in env_data.items():
-            env_lines.append(f'{k}="{v}"')
+        env_lines.append(f'TARGET_DRIVE="{env_data.get("drive", "")}"')
+        env_lines.append(f'NEW_USER="{env_data.get("username", "")}"')
+        env_lines.append(f'NEW_HOSTNAME="{env_data.get("hostname", "")}"')
+        env_lines.append(f'TIMEZONE="{env_data.get("timezone", "UTC")}"')
+        env_lines.append(f'KERNEL="{env_data.get("kernel", "linux")}"')
+        env_lines.append(f'CPU="{env_data.get("cpu", "amd-ucode")}"')
+        env_lines.append(f'GPU_PKGS="{env_data.get("gpu_pkgs", "")}"')
+        env_lines.append(f'AUDIO_PKGS="{env_data.get("audio_pkgs", "")}"')
+        env_lines.append(f'AUDIO="{env_data.get("audio", "pipewire")}"')
+        env_lines.append(f'AUR_HELPER="{env_data.get("aur", "none")}"')
+        env_lines.append(f'IS_EFI={str(env_data.get("is_efi", False)).lower()}')
         env_content = "\n".join(env_lines) + "\n"
+        env_content += f'ROOT_PASS={env_data.get("root_pass", "")}\n'
+        env_content += f'NEW_PASS={env_data.get("user_pass", "")}\n'
         try:
             with open(ENV_FILE, "w") as f:
                 f.write(env_content)
@@ -628,8 +639,6 @@ class InstallPage(Adw.NavigationPage):
             self._proc.stdin.close()
 
         GLib.timeout_add(50, self._poll_output)
-
-        self._check_done()
 
     def _poll_output(self):
         if self._proc is None:
