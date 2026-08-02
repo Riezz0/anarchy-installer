@@ -222,6 +222,36 @@ class PywalTheme:
             border: 1px solid {c['surface1']};
         }}
 
+        .anarchy-summary-card {{
+            background-color: {c['surface0']};
+            border-radius: 12px;
+            padding: 16px 20px;
+            border: 1px solid {c['surface1']};
+        }}
+
+        .anarchy-summary-header {{
+            font-size: 14px;
+            font-weight: bold;
+            color: {c['accent']};
+            margin-bottom: 8px;
+        }}
+
+        .anarchy-summary-row {{
+            font-size: 13px;
+            color: {c['fg']};
+            margin-bottom: 2px;
+        }}
+
+        .anarchy-summary-label {{
+            color: {c['subtext']};
+            font-weight: bold;
+        }}
+
+        .anarchy-summary-divider {{
+            background-color: {c['surface1']};
+            margin: 12px 0;
+        }}
+
         .anarchy-terminal {{
             background-color: {c['bg']};
             border-radius: 12px;
@@ -682,58 +712,87 @@ class SummaryPage(Adw.NavigationPage):
         self.set_tag("summary")
 
         scroll = Gtk.ScrolledWindow()
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
                         margin_top=8, margin_bottom=8,
                         margin_start=32, margin_end=32)
         outer.add_css_class("anarchy-page")
 
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        card.add_css_class("anarchy-card")
-
         lbl = Gtk.Label()
         lbl.set_markup('<span size="large" weight="bold">Installation Summary</span>')
         lbl.set_halign(Gtk.Align.START)
-        card.append(lbl)
+        outer.append(lbl)
 
         warn = Gtk.Label()
         warn.set_markup('<span weight="bold">&#9888;  This will WIPE the selected drive</span>')
         warn.set_halign(Gtk.Align.START)
         warn.add_css_class("anarchy-warn")
-        card.append(warn)
+        outer.append(warn)
 
-        self.summary_label = Gtk.Label()
-        self.summary_label.set_halign(Gtk.Align.START)
-        self.summary_label.set_vexpand(True)
-        self.summary_label.set_xalign(0)
-        self.summary_label.set_wrap(True)
-        self.summary_label.set_selectable(True)
-        self.summary_label.set_wrap(True)
-        self.summary_label.add_css_class("anarchy-summary-box")
-        card.append(self.summary_label)
+        self.section_user = self._make_section(outer)
+        self.section_drive = self._make_section(outer)
+        self.section_system = self._make_section(outer)
 
-        outer.append(card)
+        self.labels_user = {}
+        self.labels_drive = {}
+        self.labels_system = {}
+
         scroll.set_child(outer)
         self.set_child(scroll)
+
+    def _make_section(self, parent):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        card.add_css_class("anarchy-summary-card")
+        parent.append(card)
+        return card
+
+    def _make_row(self, card, key, label):
+        row = Gtk.Label()
+        row.set_halign(Gtk.Align.START)
+        row.set_xalign(0)
+        row.add_css_class("anarchy-summary-row")
+        lbl = Gtk.Label(label=label)
+        lbl.add_css_class("anarchy-summary-label")
+        lbl.set_halign(Gtk.Align.START)
+        card.append(lbl)
+        card.append(row)
+        return row
+
+    def _set_section_header(self, card, text, icon):
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_xalign(0)
+        header.set_markup(f'<span size="medium" weight="bold">{icon}  {text}</span>')
+        header.add_css_class("anarchy-summary-header")
+        card.append(header)
 
     def update_summary(self, data):
         efi_text = "UEFI" if data.get("is_efi") else "BIOS / Legacy"
         gpu = data.get("gpu_pkgs", "none")
         audio = data.get("audio", "pipewire")
-        lines = [
-            f'<b>User:</b>       {data.get("username", "?")}',
-            f'<b>Hostname:</b>   {data.get("hostname", "?")}',
-            f'<b>Timezone:</b>   {data.get("timezone", "?")}',
-            '',
-            f'<b>Drive:</b>      {data.get("drive", "?")}',
-            f'<b>Boot Mode:</b>  {efi_text}',
-            '',
-            f'<b>Kernel:</b>     {data.get("kernel", "?")}',
-            f'<b>CPU:</b>        {data.get("cpu", "?")}',
-            f'<b>GPU:</b>        {gpu}',
-            f'<b>Audio:</b>      {audio}',
-            f'<b>AUR Helper:</b> {data.get("aur", "?")}',
-        ]
-        self.summary_label.set_markup('\n'.join(lines))
+
+        # Clear previous rows
+        for section in [self.section_user, self.section_drive, self.section_system]:
+            while section.get_first_child():
+                section.remove(section.get_first_child())
+
+        # ── User section ──
+        self._set_section_header(self.section_user, "User", "\U0001f464")
+        self._make_row(self.section_user, "user", "Username").set_text(data.get("username", "?"))
+        self._make_row(self.section_user, "host", "Hostname").set_text(data.get("hostname", "?"))
+        self._make_row(self.section_user, "tz", "Timezone").set_text(data.get("timezone", "?"))
+
+        # ── Drive section ──
+        self._set_section_header(self.section_drive, "Drive", "\U0001f4be")
+        self._make_row(self.section_drive, "drive", "Target").set_text(data.get("drive", "?"))
+        self._make_row(self.section_drive, "boot", "Boot Mode").set_text(efi_text)
+
+        # ── System section ──
+        self._set_section_header(self.section_system, "System", "\U0001f5a5")
+        self._make_row(self.section_system, "kernel", "Kernel").set_text(data.get("kernel", "?"))
+        self._make_row(self.section_system, "cpu", "CPU").set_text(data.get("cpu", "?"))
+        self._make_row(self.section_system, "gpu", "GPU").set_text(gpu)
+        self._make_row(self.section_system, "audio", "Audio").set_text(audio)
+        self._make_row(self.section_system, "aur", "AUR Helper").set_text(data.get("aur", "?"))
 
 
 class InstallPage(Adw.NavigationPage):
@@ -792,6 +851,7 @@ class InstallPage(Adw.NavigationPage):
 
         self._proc = None
         self._line_buffer = ""
+        self._progress_mark = None
 
     def _feed_text(self, text):
         if HAS_VTE:
@@ -800,21 +860,23 @@ class InstallPage(Adw.NavigationPage):
         buf = self.terminal.get_buffer()
         for char in text:
             if char == "\r":
+                if self._progress_mark is not None:
+                    end = buf.get_end_iter()
+                    buf.delete(self._progress_mark, end)
+                if self._line_buffer:
+                    end = buf.get_end_iter()
+                    buf.insert(end, self._line_buffer, -1)
+                    self._progress_mark = buf.create_mark(None, end, True)
                 self._line_buffer = ""
+            elif char == "\n":
+                self._progress_mark = None
                 end = buf.get_end_iter()
-                found, start = buf.backward_search("\n", 0, end, None)
-                if found:
-                    buf.delete(start, end)
-                else:
-                    buf.delete(buf.get_start_iter(), end)
+                buf.insert(end, self._line_buffer + "\n", -1)
+                self._line_buffer = ""
             elif char == "\x1b":
-                pass
+                self._line_buffer = ""
             else:
                 self._line_buffer += char
-            if char == "\n":
-                end = buf.get_end_iter()
-                buf.insert(end, self._line_buffer, -1)
-                self._line_buffer = ""
         if self._line_buffer:
             end = buf.get_end_iter()
             buf.insert(end, self._line_buffer, -1)
@@ -827,6 +889,7 @@ class InstallPage(Adw.NavigationPage):
         end = buf.get_end_iter()
         buf.insert(end, self._line_buffer, -1)
         self._line_buffer = ""
+        self._progress_mark = None
         self.terminal.scroll_mark_onscreen(buf.get_insert())
 
     def apply_vte_palette(self, palette):
