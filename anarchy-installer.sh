@@ -267,8 +267,6 @@ sed -i '/\[anarchy-repo\]/,/^$/d' "$ORIG_CONF"
 sed -i '/^\[core\]/i \
 [anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file:///'"$REPO_SRC"'/x86_64\n' "$ORIG_CONF"
 
-rm -f "$TEMP_CONF"
-
 pacman -Sy
 
 # ------------------------------------------------------------
