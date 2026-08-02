@@ -66,6 +66,7 @@ if [[ "${1:-}" == "--gui-env" ]]; then
     set -e
     echo "[GUI] Sourced config from $ENV_FILE"
     echo "[GUI] Drive: $TARGET_DRIVE | EFI: $IS_EFI | User: $NEW_USER"
+    export GUI_MODE=1
 else
     # --- 1. Checks ---
     if [[ $EUID -ne 0 ]]; then
@@ -416,8 +417,12 @@ ok "Configuration complete"
 echo
 header "Installation Complete!"
 echo
-info "Log in and run 'hyprmon' to configure your monitors."
+if [[ "${GUI_MODE:-}" != "1" ]]; then
+    info "Log in and run 'hyprmon' to configure your monitors."
+fi
 
-if gum confirm "Do you want to reboot your system now?"; then
-    reboot
+if [[ "${GUI_MODE:-}" != "1" ]]; then
+    if gum confirm "Do you want to reboot your system now?"; then
+        reboot
+    fi
 fi
