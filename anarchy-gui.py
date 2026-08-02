@@ -964,10 +964,10 @@ class InstallPage(Adw.NavigationPage):
 
         cmd = [INSTALLER_SCRIPT, "--gui-env"] if os.geteuid() == 0 else ["sudo", INSTALLER_SCRIPT, "--gui-env"]
 
-        self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+        self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, bufsize=0)
         os.set_blocking(self._proc.stdout.fileno(), False)
-        GLib.timeout_add(50, self._poll_output)
+        GLib.timeout_add(30, self._poll_output)
 
     _PHASE_MARKERS = {
         "Partitioning":          (0.05, "Partitioning drive..."),
@@ -996,18 +996,23 @@ class InstallPage(Adw.NavigationPage):
                 self._feed_text(remaining.decode("utf-8", errors="replace"))
             self._on_finished(ret)
             return False
+        chunk = b""
         try:
-            data = os.read(self._proc.stdout.fileno(), 4096)
-            if data:
-                decoded = data.decode("utf-8", errors="replace")
-                self._feed_text(decoded)
-                for marker, (frac, label) in self._PHASE_MARKERS.items():
-                    if marker in decoded:
-                        GLib.idle_add(self.progress_bar.set_fraction, frac)
-                        GLib.idle_add(self.progress_bar.set_text, label)
-                        break
+            while True:
+                data = os.read(self._proc.stdout.fileno(), 65536)
+                if not data:
+                    break
+                chunk += data
         except BlockingIOError:
             pass
+        if chunk:
+            decoded = chunk.decode("utf-8", errors="replace")
+            self._feed_text(decoded)
+            for marker, (frac, label) in self._PHASE_MARKERS.items():
+                if marker in decoded:
+                    GLib.idle_add(self.progress_bar.set_fraction, frac)
+                    GLib.idle_add(self.progress_bar.set_text, label)
+                    break
         return True
 
     def _on_finished(self, returncode):
