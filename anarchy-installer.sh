@@ -53,109 +53,124 @@ info() {
 # --- 0. Safety Cleanup ---
 umount -R /mnt &>/dev/null
 
-# --- 1. Checks ---
-if [[ $EUID -ne 0 ]]; then
-    fail "Run with sudo!"
-    exit 1
-fi
-
-echo
-header "Anarchy Linux Install"
-echo
-
-step "Checking internet connection..."
-if ! ping -c 1 8.8.8.8 &>/dev/null; then
-    fail "Internet connection required."
-    exit 1
-fi
-ok "Internet connected"
-echo
-
-# --- 2. Setup ---
-IS_EFI=false
-[[ -d "/sys/firmware/efi" ]] && IS_EFI=true
-
-# --- 3. Drive Selection ---
-section "Drive Selection"
-echo
-TARGET_DRIVE=$(lsblk -dpno NAME,SIZE | gum choose --header "Select target drive" | awk '{print $1}')
-[ -z "$TARGET_DRIVE" ] && exit 1
-if [[ $TARGET_DRIVE =~ [0-9]$ ]]; then P="p"; else P=""; fi
-EFI_PART="${TARGET_DRIVE}${P}1"
-ROOT_PART="${TARGET_DRIVE}${P}2"
-ok "Selected: $TARGET_DRIVE"
-echo
-
-# --- 4. User Configuration ---
-section "User Configuration"
-echo
-
-ROOT_PASS=""
-while [[ -z "$ROOT_PASS" ]]; do ROOT_PASS=$(gum input --password --placeholder "Root password" --prompt " 🔑 "); done
-ok "Root password set"
-
-NEW_USER=""
-while [[ -z "$NEW_USER" ]]; do NEW_USER=$(gum input --placeholder "Username" --prompt " 👤 "); done
-ok "User: $NEW_USER"
-
-NEW_PASS=""
-while [[ -z "$NEW_PASS" ]]; do NEW_PASS=$(gum input --password --placeholder "User password" --prompt " 🔑 "); done
-ok "User password set"
-
-TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Search timezone..." --prompt " 🌍 ")
-[ -z "$TIMEZONE" ] && TIMEZONE="UTC"
-ok "Timezone: $TIMEZONE"
-
-NEW_HOSTNAME=""
-while [[ -z "$NEW_HOSTNAME" ]]; do NEW_HOSTNAME=$(gum input --placeholder "Hostname" --prompt " 🖥️  "); done
-ok "Hostname: $NEW_HOSTNAME"
-echo
-
-# --- 5. System Configuration ---
-section "System Options"
-echo
-
-KERNEL=$(gum choose --header "Select Kernel" "linux" "linux-lts" "linux-zen" "linux-hardened")
-ok "Kernel: $KERNEL"
-
-CPU=$(gum choose --header "Select CPU Microcode" "intel-ucode" "amd-ucode")
-ok "CPU: $CPU"
-
-GPU_RAW=$(gum choose --no-limit --header "Select GPU Driver(s) (Space to select, Enter to confirm)" \
-    "mesa" "nvidia" "nvidia-lts" "nvidia-dkms" "xf86-video-intel" "vulkan-radeon" "vulkan-intel" "none")
-GPU_PKGS=$(echo "$GPU_RAW" | grep -v "^none$" | tr '\n' ' ')
-ok "GPU: ${GPU_RAW:-none}"
-
-AUDIO=$(gum choose --header "Select Audio Server" "pipewire" "pulseaudio")
-if [ "$AUDIO" = "pipewire" ]; then
-    AUDIO_PKGS="pipewire pipewire-pulse pipewire-alsa wireplumber"
+# --- GUI Mode: skip TUI, source env vars ---
+if [[ "${1:-}" == "--gui-env" ]]; then
+    ENV_FILE="/tmp/.anarchy_install_env"
+    [[ -f "$ENV_FILE" ]] || { echo "ERROR: $ENV_FILE not found"; exit 1; }
+    source "$ENV_FILE"
+    IS_EFI=false
+    [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
+    if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
+    EFI_PART="${TARGET_DRIVE}${P}1"
+    ROOT_PART="${TARGET_DRIVE}${P}2"
+    set -e
+    echo "[GUI] Sourced config from $ENV_FILE"
+    echo "[GUI] Drive: $TARGET_DRIVE | EFI: $IS_EFI | User: $NEW_USER"
 else
-    AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth"
+    # --- 1. Checks ---
+    if [[ $EUID -ne 0 ]]; then
+        fail "Run with sudo!"
+        exit 1
+    fi
+
+    echo
+    header "Anarchy Linux Install"
+    echo
+
+    step "Checking internet connection..."
+    if ! ping -c 1 8.8.8.8 &>/dev/null; then
+        fail "Internet connection required."
+        exit 1
+    fi
+    ok "Internet connected"
+    echo
+
+    # --- 2. Setup ---
+    IS_EFI=false
+    [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
+
+    # --- 3. Drive Selection ---
+    section "Drive Selection"
+    echo
+    TARGET_DRIVE=$(lsblk -dpno NAME,SIZE | gum choose --header "Select target drive" | awk '{print $1}')
+    [ -z "$TARGET_DRIVE" ] && exit 1
+    if [[ $TARGET_DRIVE =~ [0-9]$ ]]; then P="p"; else P=""; fi
+    EFI_PART="${TARGET_DRIVE}${P}1"
+    ROOT_PART="${TARGET_DRIVE}${P}2"
+    ok "Selected: $TARGET_DRIVE"
+    echo
+
+    # --- 4. User Configuration ---
+    section "User Configuration"
+    echo
+
+    ROOT_PASS=""
+    while [[ -z "$ROOT_PASS" ]]; do ROOT_PASS=$(gum input --password --placeholder "Root password" --prompt " 🔑 "); done
+    ok "Root password set"
+
+    NEW_USER=""
+    while [[ -z "$NEW_USER" ]]; do NEW_USER=$(gum input --placeholder "Username" --prompt " 👤 "); done
+    ok "User: $NEW_USER"
+
+    NEW_PASS=""
+    while [[ -z "$NEW_PASS" ]]; do NEW_PASS=$(gum input --password --placeholder "User password" --prompt " 🔑 "); done
+    ok "User password set"
+
+    TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Search timezone..." --prompt " 🌍 ")
+    [ -z "$TIMEZONE" ] && TIMEZONE="UTC"
+    ok "Timezone: $TIMEZONE"
+
+    NEW_HOSTNAME=""
+    while [[ -z "$NEW_HOSTNAME" ]]; do NEW_HOSTNAME=$(gum input --placeholder "Hostname" --prompt " 🖥️  "); done
+    ok "Hostname: $NEW_HOSTNAME"
+    echo
+
+    # --- 5. System Configuration ---
+    section "System Options"
+    echo
+
+    KERNEL=$(gum choose --header "Select Kernel" "linux" "linux-lts" "linux-zen" "linux-hardened")
+    ok "Kernel: $KERNEL"
+
+    CPU=$(gum choose --header "Select CPU Microcode" "intel-ucode" "amd-ucode")
+    ok "CPU: $CPU"
+
+    GPU_RAW=$(gum choose --no-limit --header "Select GPU Driver(s) (Space to select, Enter to confirm)" \
+        "mesa" "nvidia" "nvidia-lts" "nvidia-dkms" "xf86-video-intel" "vulkan-radeon" "vulkan-intel" "none")
+    GPU_PKGS=$(echo "$GPU_RAW" | grep -v "^none$" | tr '\n' ' ')
+    ok "GPU: ${GPU_RAW:-none}"
+
+    AUDIO=$(gum choose --header "Select Audio Server" "pipewire" "pulseaudio")
+    if [ "$AUDIO" = "pipewire" ]; then
+        AUDIO_PKGS="pipewire pipewire-pulse pipewire-alsa wireplumber"
+    else
+        AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth"
+    fi
+    ok "Audio: $AUDIO"
+
+    AUR_HELPER=$(gum choose --header "Select AUR Helper" "yay" "paru" "pikaur" "none")
+    ok "AUR Helper: $AUR_HELPER"
+    echo
+
+    # --- 6. Summary ---
+    clear
+    header "Installation Summary"
+    echo
+    echo "  $(gum style --foreground "$C_SUBTEXT" "User:")      $(gum style --foreground "$C_WHITE" --bold "$NEW_USER")"
+    echo "  $(gum style --foreground "$C_SUBTEXT" "Hostname:")  $(gum style --foreground "$C_WHITE" --bold "$NEW_HOSTNAME")"
+    echo "  $(gum style --foreground "$C_SUBTEXT" "Timezone:")  $(gum style --foreground "$C_WHITE" "$TIMEZONE")"
+    echo
+    echo "  $(gum style --foreground "$C_SUBTEXT" "Drive:")     $(gum style --foreground "$C_YELLOW" --bold "$TARGET_DRIVE")"
+    echo "  $(gum style --foreground "$C_SUBTEXT" "Boot Mode:") $(gum style --foreground "$C_TEAL" "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")"
+    echo
+    echo "  $(gum style --foreground "$C_SUBTEXT" "Kernel:")    $(gum style --foreground "$C_MAUVE" --bold "$KERNEL")"
+    echo "  $(gum style --foreground "$C_SUBTEXT" "AUR:")       $(gum style --foreground "$C_MAUVE" "$AUR_HELPER")"
+    echo
+    gum confirm --affirmative "Proceed" --negative "Abort" "  ⚠  This will WIPE $TARGET_DRIVE. Continue?" || exit 1
+    echo
+
+    set -e
 fi
-ok "Audio: $AUDIO"
-
-AUR_HELPER=$(gum choose --header "Select AUR Helper" "yay" "paru" "pikaur" "none")
-ok "AUR Helper: $AUR_HELPER"
-echo
-
-# --- 6. Summary ---
-clear
-header "Installation Summary"
-echo
-echo "  $(gum style --foreground "$C_SUBTEXT" "User:")      $(gum style --foreground "$C_WHITE" --bold "$NEW_USER")"
-echo "  $(gum style --foreground "$C_SUBTEXT" "Hostname:")  $(gum style --foreground "$C_WHITE" --bold "$NEW_HOSTNAME")"
-echo "  $(gum style --foreground "$C_SUBTEXT" "Timezone:")  $(gum style --foreground "$C_WHITE" "$TIMEZONE")"
-echo
-echo "  $(gum style --foreground "$C_SUBTEXT" "Drive:")     $(gum style --foreground "$C_YELLOW" --bold "$TARGET_DRIVE")"
-echo "  $(gum style --foreground "$C_SUBTEXT" "Boot Mode:") $(gum style --foreground "$C_TEAL" "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")"
-echo
-echo "  $(gum style --foreground "$C_SUBTEXT" "Kernel:")    $(gum style --foreground "$C_MAUVE" --bold "$KERNEL")"
-echo "  $(gum style --foreground "$C_SUBTEXT" "AUR:")       $(gum style --foreground "$C_MAUVE" "$AUR_HELPER")"
-echo
-gum confirm --affirmative "Proceed" --negative "Abort" "  ⚠  This will WIPE $TARGET_DRIVE. Continue?" || exit 1
-echo
-
-set -e
 # --- EXECUTION ---
 
 # --- Step 1: Partitioning ---
