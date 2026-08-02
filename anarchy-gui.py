@@ -629,7 +629,7 @@ class InstallPage(Adw.NavigationPage):
             self._proc.stdin.close()
 
         GLib.io_add_watch(
-            GLib.IOChannel.newfile(self._proc.stdout, "r"),
+            GLib.IOChannel.new_file(self._proc.stdout, "r"),
             GLib.IO_IN,
             self._on_output
         )
@@ -891,7 +891,6 @@ class AnarchyInstaller(Adw.Application):
 
     def _on_install_confirm(self, dialog, response):
         if response == "install":
-            self.nav.add(self.install_page)
             self.nav.push(self.install_page)
             self.install_page.apply_vte_palette(self.theme.vte_palette())
             self.install_page.start_install(self.config)
