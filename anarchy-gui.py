@@ -619,40 +619,34 @@ class InstallPage(Adw.NavigationPage):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
+            bufsize=0
         )
 
         if os.geteuid() != 0 and root_pass:
-            self._proc.stdin.write(root_pass + "\n")
+            self._proc.stdin.write((root_pass + "\n").encode())
             self._proc.stdin.flush()
             self._proc.stdin.close()
 
-        GLib.io_add_watch(
-            GLib.IOChannel.new_file(self._proc.stdout, "r"),
-            GLib.IO_IN,
-            self._on_output
-        )
+        GLib.timeout_add(50, self._poll_output)
 
         self._check_done()
 
-    def _on_output(self, channel, condition):
-        line = channel.readline()
-        if line:
-            self._feed_text(line)
-            self.progress_bar.pulse()
-            return True
-        return False
-
-    def _check_done(self):
+    def _poll_output(self):
         if self._proc is None:
             return False
         ret = self._proc.poll()
         if ret is not None:
             self._on_finished(ret)
             return False
-        GLib.timeout_add(200, self._check_done)
-        return False
+        try:
+            data = os.read(self._proc.stdout.fileno(), 4096)
+            if data:
+                text = data.decode("utf-8", errors="replace")
+                self._feed_text(text)
+                self.progress_bar.pulse()
+        except (OSError, ValueError):
+            pass
+        return True
 
     def _on_finished(self, returncode):
         if returncode == 0:
