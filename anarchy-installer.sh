@@ -1,441 +1,293 @@
 #!/bin/bash
-set -euo pipefail
 
-# ============================================================
-#  Anarchy Linux Installer
-#  Arch Linux + Hyprland (UWSM) + SDDM
-#  Full offline install via local pacman repo
-# ============================================================
+# --- Color Palette (Tokyo Night) ---
+C_RED="#f7768e"      # color1
+C_GREEN="#9ece6a"    # color2
+C_YELLOW="#e0af68"   # color3
+C_BLUE="#7aa2f7"     # color4
+C_MAUVE="#bb9af7"    # color5
+C_TEAL="#7dcfff"     # color6
+C_WHITE="#c0caf5"    # color15 / special foreground
+C_SUBTEXT="#a9b1d6"  # color7
+C_BASE="#1a1b26"     # color0 / special background
 
-INSTALLER_VERSION="1.0.0"
-SETTLE_DELAY=2
-
-# ------------------------------------------------------------
-#  Colors (Tokyo Night)
-# ------------------------------------------------------------
-C_MAUVE="\e[38;2;187;154;247m"
-C_BLUE="\e[38;2;122;162;247m"
-C_TEAL="\e[38;2;125;207;255m"
-C_GREEN="\e[38;2;158;206;106m"
-C_RED="\e[38;2;247;118;142m"
-C_SUBTEXT="\e[38;2;169;177;214m"
-C_WHITE="\e[38;2;192;202;245m"
-C_YELLOW="\e[38;2;224;175;104m"
-C_RESET="\e[0m"
-
-info()    { echo -e "${C_TEAL}::${C_RESET} $1"; }
-success() { echo -e "${C_GREEN}::${C_RESET} $1"; }
-error()   { echo -e "${C_RED}::${C_RESET} $1"; }
-fatal()   { error "$1"; exit 1; }
-
+# --- Helpers ---
 header() {
     gum style \
+        --foreground "$C_MAUVE" \
         --border double \
         --align center \
-        --foreground "$C_BLUE" \
-        --border-foreground "$C_BLUE" \
+        --width 50 \
+        --margin "1 2" \
+        --padding "0 2" \
         "$1"
 }
 
-# ------------------------------------------------------------
-#  Header
-# ------------------------------------------------------------
-clear
-gum style \
-    --border double \
-    --align center \
-    --foreground "$C_MAUVE" \
-    --border-foreground "$C_MAUVE" \
-    "Anarchy Linux Install" "v${INSTALLER_VERSION}"
+section() {
+    gum style \
+        --foreground "$C_BLUE" \
+        --border rounded \
+        --align left \
+        --width 50 \
+        --margin "0 1" \
+        --padding "0 1" \
+        "$1"
+}
 
-# ------------------------------------------------------------
-#  Pre-flight Checks
-# ------------------------------------------------------------
-echo
-info "Running pre-flight checks..."
+step() {
+    gum style --foreground "$C_TEAL" --bold "  :: $1"
+}
 
-umount -R /mnt &>/dev/null || true
+ok() {
+    gum style --foreground "$C_GREEN" "  ✔ $1"
+}
 
-[[ $EUID -eq 0 ]] || fatal "This script must be run as root."
+fail() {
+    gum style --foreground "$C_RED" --bold "  ✘ $1"
+}
 
-if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
-    success "Internet connection detected."
-else
-    echo -e "${C_YELLOW}No internet connection detected. Continuing with offline install from local repo.${C_RESET}"
+info() {
+    gum style --foreground "$C_SUBTEXT" "     $1"
+}
+
+# --- 0. Safety Cleanup ---
+umount -R /mnt &>/dev/null
+
+# --- 1. Checks ---
+if [[ $EUID -ne 0 ]]; then
+    fail "Run with sudo!"
+    exit 1
 fi
 
+echo
+header "Anarchy Linux Install"
+echo
+
+step "Checking internet connection..."
+if ! ping -c 1 8.8.8.8 &>/dev/null; then
+    fail "Internet connection required."
+    exit 1
+fi
+ok "Internet connected"
+echo
+
+# --- 2. Setup ---
 IS_EFI=false
 [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
 
-# ------------------------------------------------------------
-#  Drive Selection
-# ------------------------------------------------------------
+# --- 3. Drive Selection ---
+section "Drive Selection"
 echo
-header "Drive Selection"
-
 TARGET_DRIVE=$(lsblk -dpno NAME,SIZE | gum choose --header "Select target drive" | awk '{print $1}')
-[[ -n "$TARGET_DRIVE" ]] || fatal "No drive selected."
-
-if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then
-    EFI_PART="${TARGET_DRIVE}p1"
-    ROOT_PART="${TARGET_DRIVE}p2"
-else
-    EFI_PART="${TARGET_DRIVE}1"
-    ROOT_PART="${TARGET_DRIVE}2"
-fi
-
-# ------------------------------------------------------------
-#  User Information
-# ------------------------------------------------------------
+[ -z "$TARGET_DRIVE" ] && exit 1
+if [[ $TARGET_DRIVE =~ [0-9]$ ]]; then P="p"; else P=""; fi
+EFI_PART="${TARGET_DRIVE}${P}1"
+ROOT_PART="${TARGET_DRIVE}${P}2"
+ok "Selected: $TARGET_DRIVE"
 echo
-header "User Information"
 
-prompt_nonempty() {
-    local result=""
-    while [[ -z "$result" ]]; do
-        result=$(gum input --placeholder "$1" --prompt " $2 ")
-    done
-    echo "$result"
-}
-
-ROOT_PASS=$(prompt_nonempty "Root password" " ")
-NEW_USER=$(prompt_nonempty "Username" " ")
-NEW_PASS=$(prompt_nonempty "User password" " ")
-
-TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Search timezone..." --prompt " Timezone: ")
-TIMEZONE=${TIMEZONE:-UTC}
-
-NEW_HOSTNAME=$(prompt_nonempty "Hostname" " ")
-
-# ------------------------------------------------------------
-#  System Configuration
-# ------------------------------------------------------------
+# --- 4. User Configuration ---
+section "User Configuration"
 echo
-header "System Configuration"
+
+ROOT_PASS=""
+while [[ -z "$ROOT_PASS" ]]; do ROOT_PASS=$(gum input --password --placeholder "Root password" --prompt " 🔑 "); done
+ok "Root password set"
+
+NEW_USER=""
+while [[ -z "$NEW_USER" ]]; do NEW_USER=$(gum input --placeholder "Username" --prompt " 👤 "); done
+ok "User: $NEW_USER"
+
+NEW_PASS=""
+while [[ -z "$NEW_PASS" ]]; do NEW_PASS=$(gum input --password --placeholder "User password" --prompt " 🔑 "); done
+ok "User password set"
+
+TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder "Search timezone..." --prompt " 🌍 ")
+[ -z "$TIMEZONE" ] && TIMEZONE="UTC"
+ok "Timezone: $TIMEZONE"
+
+NEW_HOSTNAME=""
+while [[ -z "$NEW_HOSTNAME" ]]; do NEW_HOSTNAME=$(gum input --placeholder "Hostname" --prompt " 🖥️  "); done
+ok "Hostname: $NEW_HOSTNAME"
+echo
+
+# --- 5. System Configuration ---
+section "System Options"
+echo
 
 KERNEL=$(gum choose --header "Select Kernel" "linux" "linux-lts" "linux-zen" "linux-hardened")
-[[ -n "$KERNEL" ]] || fatal "No kernel selected."
+ok "Kernel: $KERNEL"
 
-if [[ "$KERNEL" == "linux" ]]; then
-    KERNEL_HEADERS="linux-headers"
-else
-    KERNEL_HEADERS="${KERNEL}-headers"
-fi
+CPU=$(gum choose --header "Select CPU Microcode" "intel-ucode" "amd-ucode")
+ok "CPU: $CPU"
 
-ARCH=$(uname -m)
-if [[ "$ARCH" == "x86_64" ]]; then
-    CPU=$(gum choose --header "Select CPU Microcode" "intel-ucode" "amd-ucode")
-else
-    CPU="none"
-fi
-
-GPU_RAW=$(gum choose --no-limit --header "Select GPU Driver(s)..." \
-    "mesa" "nvidia" "nvidia-lts" "nvidia-dkms" \
-    "xf86-video-intel" "vulkan-radeon" "vulkan-intel" "none")
-GPU_PKGS=$(echo "$GPU_RAW" | grep -v '^none$' | tr '\n' ' ')
+GPU_RAW=$(gum choose --no-limit --header "Select GPU Driver(s) (Space to select, Enter to confirm)" \
+    "mesa" "nvidia" "nvidia-lts" "nvidia-dkms" "xf86-video-intel" "vulkan-radeon" "vulkan-intel" "none")
+GPU_PKGS=$(echo "$GPU_RAW" | grep -v "^none$" | tr '\n' ' ')
+ok "GPU: ${GPU_RAW:-none}"
 
 AUDIO=$(gum choose --header "Select Audio Server" "pipewire" "pulseaudio")
-if [[ "$AUDIO" == "pipewire" ]]; then
+if [ "$AUDIO" = "pipewire" ]; then
     AUDIO_PKGS="pipewire pipewire-pulse pipewire-alsa wireplumber"
 else
     AUDIO_PKGS="pulseaudio pulseaudio-alsa pulseaudio-bluetooth"
 fi
+ok "Audio: $AUDIO"
 
 AUR_HELPER=$(gum choose --header "Select AUR Helper" "yay" "paru" "pikaur" "none")
+ok "AUR Helper: $AUR_HELPER"
+echo
 
-# ------------------------------------------------------------
-#  Summary
-# ------------------------------------------------------------
+# --- 6. Summary ---
 clear
-gum style \
-    --border double \
-    --align center \
-    --foreground "$C_MAUVE" \
-    --border-foreground "$C_MAUVE" \
-    "Review & Confirm"
-
+header "Installation Summary"
 echo
-echo -e "  ${C_BLUE}Username:${C_RESET}      $NEW_USER"
-echo -e "  ${C_BLUE}Hostname:${C_RESET}      $NEW_HOSTNAME"
-echo -e "  ${C_BLUE}Timezone:${C_RESET}      $TIMEZONE"
-echo -e "  ${C_BLUE}Target:${C_RESET}        ${C_YELLOW}$TARGET_DRIVE${C_RESET}"
-echo -e "  ${C_BLUE}Boot Mode:${C_RESET}     $([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")"
-echo -e "  ${C_BLUE}Kernel:${C_RESET}        $KERNEL"
-echo -e "  ${C_BLUE}CPU:${C_RESET}           $CPU"
-echo -e "  ${C_BLUE}GPU:${C_RESET}           ${GPU_PKGS:-none}"
-echo -e "  ${C_BLUE}Audio:${C_RESET}         $AUDIO"
-echo -e "  ${C_BLUE}AUR Helper:${C_RESET}    $AUR_HELPER"
+echo "  $(gum style --foreground "$C_SUBTEXT" "User:")      $(gum style --foreground "$C_WHITE" --bold "$NEW_USER")"
+echo "  $(gum style --foreground "$C_SUBTEXT" "Hostname:")  $(gum style --foreground "$C_WHITE" --bold "$NEW_HOSTNAME")"
+echo "  $(gum style --foreground "$C_SUBTEXT" "Timezone:")  $(gum style --foreground "$C_WHITE" "$TIMEZONE")"
+echo
+echo "  $(gum style --foreground "$C_SUBTEXT" "Drive:")     $(gum style --foreground "$C_YELLOW" --bold "$TARGET_DRIVE")"
+echo "  $(gum style --foreground "$C_SUBTEXT" "Boot Mode:") $(gum style --foreground "$C_TEAL" "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")"
+echo
+echo "  $(gum style --foreground "$C_SUBTEXT" "Kernel:")    $(gum style --foreground "$C_MAUVE" --bold "$KERNEL")"
+echo "  $(gum style --foreground "$C_SUBTEXT" "AUR:")       $(gum style --foreground "$C_MAUVE" "$AUR_HELPER")"
+echo
+gum confirm --affirmative "Proceed" --negative "Abort" "  ⚠  This will WIPE $TARGET_DRIVE. Continue?" || exit 1
 echo
 
-if ! gum confirm --affirmative "Proceed" --negative "Abort" "This will WIPE $TARGET_DRIVE. Continue?"; then
-    fatal "Installation aborted."
-fi
-
-# ============================================================
-#  EXECUTION
-# ============================================================
 set -e
+# --- EXECUTION ---
 
-cleanup() {
-    error "Script failed. Cleaning up..."
-    umount -Rlf /mnt 2>/dev/null || true
-}
-trap cleanup ERR
-
-# ------------------------------------------------------------
-#  Partitioning
-# ------------------------------------------------------------
-info "Partitioning $TARGET_DRIVE..."
-
-swapoff "$TARGET_DRIVE"* 2>/dev/null || true
-umount -R /mnt 2>/dev/null || true
-for part in $(lsblk -rno NAME "$TARGET_DRIVE" | tail -n +2); do
-    umount "/dev/$part" 2>/dev/null || true
-done
-
-sgdisk -Z "$TARGET_DRIVE" &>/dev/null
-
-if [[ "$IS_EFI" == true ]]; then
-    sgdisk -n 1:0:+512M -t 1:ef00 "$TARGET_DRIVE"
+# --- Step 1: Partitioning ---
+step "Partitioning $TARGET_DRIVE..."
+sgdisk -Z $TARGET_DRIVE
+if [ "$IS_EFI" = true ]; then
+    sgdisk -n 1:0:+512M -t 1:ef00 $TARGET_DRIVE
 else
-    sgdisk -n 1:0:+1M -t 1:ef02 "$TARGET_DRIVE"
+    sgdisk -n 1:0:+1M -t 1:ef02 $TARGET_DRIVE
 fi
-sgdisk -n 2:0:0 -t 2:8300 "$TARGET_DRIVE"
+sgdisk -n 2:0:0 -t 2:8300 $TARGET_DRIVE
+partprobe $TARGET_DRIVE
+sleep 2
+ok "Partitions created"
+echo
 
-partprobe "$TARGET_DRIVE"
-sleep "$SETTLE_DELAY"
-
-# ------------------------------------------------------------
-#  Filesystems
-# ------------------------------------------------------------
-info "Formatting partitions..."
-
-if [[ "$IS_EFI" == true ]]; then
-    mkfs.vfat -F 32 "$EFI_PART"
-fi
+# --- Step 2: Formatting ---
+step "Formatting partitions..."
+if [ "$IS_EFI" = true ]; then mkfs.vfat -F 32 "$EFI_PART"; fi
 mkfs.btrfs -L ARCH_ROOT -f "$ROOT_PART"
+ok "Filesystems formatted"
+echo
 
-# ------------------------------------------------------------
-#  Btrfs Subvolumes
-# ------------------------------------------------------------
-info "Creating btrfs subvolumes..."
-
+# --- Step 3: Btrfs Subvolumes ---
+step "Creating Btrfs subvolumes..."
 mount "$ROOT_PART" /mnt
-
 btrfs subvolume create /mnt/@
 btrfs subvolume create /mnt/@home
 btrfs subvolume create /mnt/@log
 btrfs subvolume create /mnt/@pkg
 btrfs subvolume create /mnt/@.snapshots
+umount /mnt
 
-umount -R /mnt
+mount -o noatime,compress=zstd,subvol=@ "$ROOT_PART" /mnt
+mkdir -p /mnt/home /mnt/var/log /mnt/var/cache/pacman/pkg /mnt/.snapshots /mnt/boot
 
-OPTS="noatime,compress=zstd"
-mount -o "subvol=@" "$ROOT_PART" /mnt
-mkdir -p /mnt/{home,var/log,var/cache/pacman/pkg,.snapshots,boot}
+mount -o noatime,compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
+mount -o noatime,compress=zstd,subvol=@log "$ROOT_PART" /mnt/var/log
+mount -o noatime,compress=zstd,subvol=@pkg "$ROOT_PART" /mnt/var/cache/pacman/pkg
+mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
 
-mount -o "subvol=@home" "$ROOT_PART" /mnt/home
-mount -o "subvol=@log" "$ROOT_PART" /mnt/var/log
-mount -o "subvol=@pkg" "$ROOT_PART" /mnt/var/cache/pacman/pkg
-mount -o "subvol=@.snapshots" "$ROOT_PART" /mnt/.snapshots
+if [ "$IS_EFI" = true ]; then mount "$EFI_PART" /mnt/boot; fi
+ok "Subvolumes mounted"
+echo
 
-if [[ "$IS_EFI" == true ]]; then
-    mount "$EFI_PART" /mnt/boot
-fi
+# --- Step 4: Cloning System ---
+step "Cloning system to target..."
+rsync -aAXhW --numeric-ids --info=progress2 \
+    --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
+    --exclude={"/var/cache/*","/var/log/*","/var/tmp/*"} \
+    --exclude={"/usr/share/doc/*","/usr/share/man/*","/usr/share/info/*"} \
+    --exclude={"/usr/lib/modules/*","/usr/lib/firmware/*"} \
+    --exclude="/etc/pacman.d/gnupg/*" \
+    --exclude="/root/*" \
+    / /mnt/
+ok "System cloned"
+echo
 
-# ------------------------------------------------------------
-#  Local Repo & Pacman Configuration
-# ------------------------------------------------------------
-info "Configuring pacman for local repo..."
-
-# Check a few common locations where the repo might live on the ISO
-if [[ -d "/repo" ]]; then
-    REPO_SRC="/repo"
-elif [[ -d "$(dirname "$0")/repo" ]]; then
-    REPO_SRC="$(dirname "$0")/repo"
-elif [[ -d "./repo" ]]; then
-    REPO_SRC="./repo"
-else
-    fatal "Local repo not found. Cannot proceed with offline install."
-fi
-
-ORIG_CONF="/etc/pacman.conf"
-cp "$ORIG_CONF" "${ORIG_CONF}.bak"
-
-sed -i '/\[anarchy-repo\]/,/^$/d' "$ORIG_CONF"
-
-sed -i '/^\[core\]/i \
-[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file:///'"$REPO_SRC"'/x86_64\n' "$ORIG_CONF"
-
-pacman -Sy
-
-# ------------------------------------------------------------
-#  Pacstrap
-# ------------------------------------------------------------
-info "Installing base system with pacstrap..."
-
-PACKAGES=(
-    base
-    "$KERNEL" "$KERNEL_HEADERS"
-    linux-firmware
-    btrfs-progs
-    grub
-    networkmanager
-    sddm
-    gum
-    git
-    sudo
-    zsh
-    rsync
-    stow
-    arch-update
-    hyprland
-    uwsm
-    xdg-desktop-portal-hyprland
-    xdg-utils
-    xdg-user-dirs
-    polkit
-    qt5-wayland
-    qt6-wayland
-    xorg-xwayland
-    kitty
-    neovim
-    nautilus
-    rofi
-    hypridle
-    hyprlock
-    hyprmon-bin
-    hyprpicker
-    pyprland
-    oh-my-zsh-git
-    gradience-git
-    goverlay-git
-    nwg-displays
-    nwg-look
-    kvantum-qt6-git
-    adw-gtk-theme-git
-    eza
-    blueman
-    bluez
-    bluez-utils
-    swaync
-    vesktop-bin
-    vencord-bin
-    inter-font
-    ttf-jetbrains-mono-nerd
-    ttf-font-awesome
-    otf-font-awesome
-    python-pywal16
-    python-pywalfox
-    python-gobject
-    python-cssutils
-    python-libsass
-    python-anyascii
-    python-material-color-utilities
-    python-yapsy-git
-    awww
-    wlsunset
-    grim-git
-    slurp-git
-    wf-recorder-git
-    vkbasalt
-    xfce-polkit
-    zsh-autocomplete
-    zsh-autosuggestions
-    zsh-syntax-highlighting
-    zsh-fast-syntax-highlighting
-    zsh-autoswitch-virtualenv-git
-    qt5-graphicaleffects
-    qt5-imageformats
-    qt5-multimedia
-    qt5-quickcontrols
-    qt5-quickcontrols2
-    qt5-styleplugins
-    qt5-svg
-    qt6-base
-    qt6-declarative
-    qt6-imageformats
-    qt6-multimedia
-    qt6-svg
-    gtk2
-    mesa-utils
-    nautilus-admin-gtk4
-    nautilus-open-any-terminal-git
-    coolercontrol
-    coolercontrold
-    plymouth
-    vlc
-    vlc-plugins-all
-    xdg-terminal-exec
-)
-
-[[ "$CPU" != "none" ]] && PACKAGES+=("$CPU")
-[[ -n "$GPU_PKGS" ]] && PACKAGES+=($GPU_PKGS)
-PACKAGES+=($AUDIO_PKGS)
-
-if [[ "$IS_EFI" == true ]]; then
-    PACKAGES+=(efibootmgr)
-fi
-
-pacstrap -K -C /etc/pacman.conf /mnt "${PACKAGES[@]}"
-
-# Restore original pacman.conf on ISO
-cp "$ORIG_CONF.bak" "$ORIG_CONF" 2>/dev/null || true
-
-# ------------------------------------------------------------
-#  Fstab
-# ------------------------------------------------------------
-info "Generating fstab..."
-
+# --- Step 5: Configuration (Chroot) ---
+step "Configuring target system..."
 genfstab -U /mnt >> /mnt/etc/fstab
+cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
 
-# ------------------------------------------------------------
-#  Chroot Configuration
-# ------------------------------------------------------------
-info "Configuring system in chroot..."
+partprobe $TARGET_DRIVE
+udevadm settle
+sleep 2
+ROOT_UUID=$(lsblk -no UUID $ROOT_PART)
 
-cp -r "$REPO_SRC" /mnt/repo
-
-ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
-
+# --- Write env vars to file (avoids heredoc expansion mangling passwords) ---
+cat > /mnt/.install_env <<ENVEOF
+TARGET_DRIVE="$TARGET_DRIVE"
+IS_EFI=$IS_EFI
+ROOT_UUID="$ROOT_UUID"
+KERNEL="$KERNEL"
+CPU="$CPU"
+GPU_PKGS="$GPU_PKGS"
+AUDIO_PKGS="$AUDIO_PKGS"
+AUR_HELPER="$AUR_HELPER"
+NEW_USER="$NEW_USER"
+TIMEZONE="$TIMEZONE"
+NEW_HOSTNAME="$NEW_HOSTNAME"
+ENVEOF
 printf 'ROOT_PASS=%s\n' "$ROOT_PASS" >> /mnt/.install_env
-printf 'NEW_USER=%s\n' "$NEW_USER" >> /mnt/.install_env
 printf 'NEW_PASS=%s\n' "$NEW_PASS" >> /mnt/.install_env
-printf 'TIMEZONE=%s\n' "$TIMEZONE" >> /mnt/.install_env
-printf 'NEW_HOSTNAME=%s\n' "$NEW_HOSTNAME" >> /mnt/.install_env
-printf 'ROOT_UUID=%s\n' "$ROOT_UUID" >> /mnt/.install_env
-printf 'IS_EFI=%s\n' "$IS_EFI" >> /mnt/.install_env
-printf 'TARGET_DRIVE=%s\n' "$TARGET_DRIVE" >> /mnt/.install_env
-printf 'AUR_HELPER=%s\n' "$AUR_HELPER" >> /mnt/.install_env
 
 arch-chroot /mnt /bin/bash <<'CHEOF'
 set -e
 source /.install_env
 
-# Keyring
+echo ":: Repairing cloned pacman database..."
+find /var/lib/pacman/local/ -type f -name "desc" -exec sed -i '/^%INSTALLED_DB%/,/^$/d' {} +
+
 pacman-key --init
 pacman-key --populate archlinux
 
-# Hostname
-echo "$NEW_HOSTNAME" > /etc/hostname
+echo ":: Cleaning boot config..."
+pacman -Rns --noconfirm archiso 2>/dev/null || true
+rm -rf /etc/mkinitcpio.conf.d
+rm -f /etc/mkinitcpio.d/*.preset
+rm -f /boot/vmlinuz* /boot/initramfs*
 
-# Timezone
-ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
-hwclock --systohc
+echo "MODULES=(btrfs)" > /etc/mkinitcpio.conf
+echo "BINARIES=()" >> /etc/mkinitcpio.conf
+echo "FILES=()" >> /etc/mkinitcpio.conf
+echo "HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)" >> /etc/mkinitcpio.conf
 
-# Locale
-sed -i 's/#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
-locale-gen
-echo "LANG=en_US.UTF-8" > /etc/locale.conf
+echo ":: Removing Live User configs..."
+userdel -f -r liveuser 2>/dev/null || true
+rm -rf /etc/sddm.conf.d/*
+if [ -f /etc/sddm.conf ]; then
+    sed -i '/Autologin/d' /etc/sddm.conf
+    sed -i '/User=liveuser/d' /etc/sddm.conf
+fi
 
-# Users
-printf '%s\n' "root:$ROOT_PASS" | chpasswd
-useradd -m -G wheel -s /bin/zsh "$NEW_USER"
-printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
-sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+rm -f /etc/sudoers.d/g_wheel
+rm -f /etc/sudoers.d/01_archiso
 
-# GRUB
-if [[ "$IS_EFI" == "true" ]]; then
+echo ":: Installing Kernel, Drivers, and Core Packages..."
+KERNEL_HEADERS="${KERNEL}-headers"
+[[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
+
+if [ "$AUDIO" = "pipewire" ]; then
+    pacman -Rns --noconfirm pulseaudio pulseaudio-bluetooth pulseaudio-zeroconf pulseaudio-alsa 2>/dev/null || true
+else
+    pacman -Rns --noconfirm pipewire pipewire-pulse pipewire-alsa pipewire-jack pipewire-zeroconf wireplumber 2>/dev/null || true
+fi
+
+pacman -Sy --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
+mkinitcpio -P
+
+echo ":: Configuring Grub..."
+if [ "$IS_EFI" = true ]; then
     grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
 else
     grub-install --target=i386-pc "$TARGET_DRIVE" --recheck
@@ -445,9 +297,21 @@ sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/defa
 sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"root=UUID=$ROOT_UUID rootflags=subvol=@ rw\"|" /etc/default/grub
 grub-mkconfig -o /boot/grub/grub.cfg
 
-# AUR Helper
-if [[ "$AUR_HELPER" != "none" ]]; then
+echo ":: Setting System Identity..."
+echo "$NEW_HOSTNAME" > /etc/hostname
+ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
+hwclock --systohc
+
+echo ":: Creating Users..."
+printf '%s\n' "root:$ROOT_PASS" | chpasswd
+useradd -m -G wheel -s /bin/bash "$NEW_USER"
+printf '%s:%s\n' "$NEW_USER" "$NEW_PASS" | chpasswd
+sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+
+if [ "$AUR_HELPER" != "none" ]; then
+    echo ":: Installing AUR Helper: $AUR_HELPER"
     pacman -S --needed --noconfirm base-devel git
+
     sudo -u "$NEW_USER" bash -c "
         cd /home/$NEW_USER
         case '$AUR_HELPER' in
@@ -461,37 +325,18 @@ if [[ "$AUR_HELPER" != "none" ]]; then
     "
 fi
 
-# Services
+echo ":: Enabling Services..."
 systemctl enable NetworkManager
 systemctl enable sddm
-systemctl enable bluetooth 2>/dev/null || true
-systemctl enable coolercontrold.service 2>/dev/null || true
 
-# Arch-Update tray
-sudo -u "$NEW_USER" arch-update --tray --enable 2>/dev/null || true
+echo ":: Cloning Dotfiles..."
+git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
+chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
-# Local repo on target (for future installs)
-cp -r /repo /var/cache/anarchy-repo
-cat >> /etc/pacman.conf <<REPO
-
-[anarchy-repo]
-SigLevel = Optional TrustAll
-Server = file:///var/cache/anarchy-repo
-REPO
-
-# Dotfiles
-DOTFILES_DIR="/home/$NEW_USER/anarchydots"
-git clone https://github.com/Riezz0/anarchydots "$DOTFILES_DIR"
-chown -R "$NEW_USER:users" "$DOTFILES_DIR"
-
-# Clean before stow
+echo ":: Stowing Dotfiles Packages..."
 rm -rf "/home/$NEW_USER/.config"
 rm -rf "/home/$NEW_USER/.icons"
 rm -rf "/home/$NEW_USER/.themes"
-rm -rf "/home/$NEW_USER/.oh-my-zsh"
-rm -rf "/home/$NEW_USER/.cache"
-rm -f "/home/$NEW_USER/.zshrc"
-
 if [ -d "/home/$NEW_USER/.local/share/themes" ]; then
     cp -a "/home/$NEW_USER/.local/share/themes" "/tmp/user_themes_backup"
 fi
@@ -499,53 +344,55 @@ rm -rf "/home/$NEW_USER/.local"
 if [ -d "/tmp/user_themes_backup" ]; then
     mkdir -p "/home/$NEW_USER/.local/share"
     mv "/tmp/user_themes_backup" "/home/$NEW_USER/.local/share/themes"
+    chown -R "$NEW_USER:users" "/home/$NEW_USER/.local"
 fi
+rm -rf "/home/$NEW_USER/.oh-my-zsh"
+rm -rf "/home/$NEW_USER/.cache"
+rm -f "/home/$NEW_USER/.zshrc"
 
-# Stow
-cd "$DOTFILES_DIR"
-sudo stow -t /usr/local scripts 2>/dev/null || true
-sudo -u "$NEW_USER" stow --restow \
-    bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland \
-    icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell \
-    rofi themes wal xkb zsh \
-    -t "/home/$NEW_USER"
+cd "/home/$NEW_USER/anarchydots"
+rm -rf /usr/local/bin
 
-# Fonts
+#1
+sudo mkdir -p /usr/local/
+#2
+sudo stow -t /usr/local scripts
+ls -la /usr/local/bin/ | head -5
+echo "  ✔ Scripts stowed"
+sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
+echo ":: Installing Fonts..."
 mkdir -p "/home/$NEW_USER/.local/share/fonts/"
-cp -r "$DOTFILES_DIR/fonts/." "/home/$NEW_USER/.local/share/fonts/"
-chown -R "$NEW_USER:users" "/home/$NEW_USER/.local"
+cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
 fc-cache -fv
 
-# SDDM
-cp "$DOTFILES_DIR/sys/sddm/sddm.conf" /etc/
-cp -r "$DOTFILES_DIR/sys/sddm/anarchy-sddm/" /usr/share/sddm/themes/
+echo ":: Configuring SDDM..."
+cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
+cp -r "/home/$NEW_USER/anarchydots/sys/sddm/anarchy-sddm/" "/usr/share/sddm/themes/"
+
+# One-time setup (run with sudo)
 mkdir -p /var/local/sddm-wallpaper
 chown "$NEW_USER:sddm" /var/local/sddm-wallpaper
 chmod 775 /var/local/sddm-wallpaper
 
-# GRUB theme
-cp -r "$DOTFILES_DIR/sys/grub/grub" /etc/default/
-cp -r "$DOTFILES_DIR/sys/grub/tokyo-night" /usr/share/grub/themes/
-grub-mkconfig -o /boot/grub/grub.cfg
+echo ":: Configuring GRUB Theme..."
+cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
+cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"
 
-# Cleanup
+echo ":: Enabling Additional Services..."
+grub-mkconfig -o /boot/grub/grub.cfg
+systemctl enable bluetooth 2>/dev/null || true
+systemctl enable coolercontrold.service 2>/dev/null || true
+sudo -u "$NEW_USER" arch-update --tray --enable
+chsh -s /bin/zsh "$NEW_USER"
+chsh -s /bin/zsh root
+
 rm -f /.install_env
 CHEOF
-
-# ------------------------------------------------------------
-#  Cleanup
-# ------------------------------------------------------------
-rm -f /mnt/.install_env
-umount -Rlf /mnt
+umount -R /mnt
+ok "Configuration complete"
 
 echo
-gum style \
-    --border double \
-    --align center \
-    --foreground "$C_GREEN" \
-    --border-foreground "$C_GREEN" \
-    "Installation Complete!"
-
+header "Installation Complete!"
 echo
 info "Log in and run 'hyprmon' to configure your monitors."
 
