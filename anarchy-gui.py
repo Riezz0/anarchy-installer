@@ -637,20 +637,15 @@ class InstallPage(Adw.NavigationPage):
         if os.geteuid() == 0:
             cmd = [INSTALLER_SCRIPT, "--gui-env"]
         else:
-            cmd = ["sudo", "-S", INSTALLER_SCRIPT, "--gui-env"]
+            cmd = ["sudo", INSTALLER_SCRIPT, "--gui-env"]
 
         self._proc = subprocess.Popen(
             cmd,
-            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             bufsize=0
         )
-
-        if os.geteuid() != 0 and root_pass:
-            self._proc.stdin.write((root_pass + "\n").encode())
-            self._proc.stdin.flush()
-            self._proc.stdin.close()
+        os.set_blocking(self._proc.stdout.fileno(), False)
 
         GLib.timeout_add(50, self._poll_output)
 
@@ -659,6 +654,9 @@ class InstallPage(Adw.NavigationPage):
             return False
         ret = self._proc.poll()
         if ret is not None:
+            remaining = self._proc.stdout.read()
+            if remaining:
+                self._feed_text(remaining.decode("utf-8", errors="replace"))
             self._on_finished(ret)
             return False
         try:
@@ -667,7 +665,7 @@ class InstallPage(Adw.NavigationPage):
                 text = data.decode("utf-8", errors="replace")
                 self._feed_text(text)
                 self.progress_bar.pulse()
-        except (OSError, ValueError):
+        except BlockingIOError:
             pass
         return True
 
