@@ -850,52 +850,72 @@ class InstallPage(Adw.NavigationPage):
         self.set_child(outer)
 
         self._proc = None
-        self._line_buffer = ""
-        self._progress_mark = None
+        self._progress_len = 0
+        self._term_buffer = ""
+        self._ansi_partial = ""
+
+    _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(?:\x07|\x1b\\)|\x1b[^[\]]')
 
     def _feed_text(self, text):
         if HAS_VTE:
             self.terminal.feed(GLib.Bytes(text.encode("utf-8", errors="replace")), -1)
             return
+        text = self._ansi_partial + text
+        self._ansi_partial = ""
+        incomplete = text.rstrip('\x1b')
+        if len(text) - len(incomplete) > 0:
+            remainder = text[len(incomplete):]
+            if remainder == '\x1b':
+                self._ansi_partial = '\x1b'
+        self._term_buffer += self._ANSI_RE.sub('', incomplete)
+        self._process_term_buffer()
+
+    def _process_term_buffer(self):
         buf = self.terminal.get_buffer()
-        for char in text:
-            if char == "\r":
-                if self._progress_mark is not None:
-                    start = buf.get_iter_at_mark(self._progress_mark)
+        while self._term_buffer:
+            cr = self._term_buffer.find('\r')
+            nl = self._term_buffer.find('\n')
+            if cr == -1 and nl == -1:
+                break
+            if cr != -1 and (nl == -1 or cr < nl):
+                segment = self._term_buffer[:cr]
+                self._term_buffer = self._term_buffer[cr + 1:]
+                if self._progress_len > 0:
                     end = buf.get_end_iter()
+                    start = end.copy()
+                    start.backward_chars(self._progress_len)
                     buf.delete(start, end)
-                if self._line_buffer:
+                if segment:
                     end = buf.get_end_iter()
-                    self._progress_mark = buf.create_mark(None, end, True)
-                    buf.insert(end, self._line_buffer, -1)
-                    m = re.search(r'(\d+)%', self._line_buffer)
+                    buf.insert(end, segment, -1)
+                    self._progress_len = len(segment)
+                    m = re.search(r'(\d+)%', segment)
                     if m and self.progress_bar:
                         pct = int(m.group(1)) / 100.0
                         GLib.idle_add(self.progress_bar.set_fraction, pct)
                         GLib.idle_add(self.progress_bar.set_text, f"{m.group(1)}%")
-                self._line_buffer = ""
-            elif char == "\n":
-                self._progress_mark = None
-                end = buf.get_end_iter()
-                buf.insert(end, self._line_buffer + "\n", -1)
-                self._line_buffer = ""
-            elif char == "\x1b":
-                self._line_buffer = ""
+                else:
+                    self._progress_len = 0
             else:
-                self._line_buffer += char
-        if self._line_buffer:
-            end = buf.get_end_iter()
-            buf.insert(end, self._line_buffer, -1)
+                segment = self._term_buffer[:nl]
+                self._term_buffer = self._term_buffer[nl + 1:]
+                if self._progress_len > 0:
+                    end = buf.get_end_iter()
+                    start = end.copy()
+                    start.backward_chars(self._progress_len)
+                    buf.delete(start, end)
+                    self._progress_len = 0
+                end = buf.get_end_iter()
+                buf.insert(end, segment + "\n", -1)
         self.terminal.scroll_mark_onscreen(buf.get_insert())
 
     def _flush_line(self):
-        if HAS_VTE or not self._line_buffer:
+        if HAS_VTE or not self._term_buffer:
             return
         buf = self.terminal.get_buffer()
         end = buf.get_end_iter()
-        buf.insert(end, self._line_buffer, -1)
-        self._line_buffer = ""
-        self._progress_mark = None
+        buf.insert(end, self._term_buffer, -1)
+        self._term_buffer = ""
         self.terminal.scroll_mark_onscreen(buf.get_insert())
 
     def apply_vte_palette(self, palette):
