@@ -254,12 +254,14 @@ fi
 ORIG_CONF="/etc/pacman.conf"
 cp "$ORIG_CONF" "${ORIG_CONF}.bak"
 
+sed -i '/\[anarchy-repo\]/,/^$/d' "$ORIG_CONF"
+
 TEMP_CONF="/tmp/pacman-offline.conf"
 
 cat > "$TEMP_CONF" <<EOF
 [anarchy-repo]
 SigLevel = Optional TrustAll
-Server = file://$REPO_SRC/x86_64
+Server = file:///$REPO_SRC/x86_64
 
 EOF
 
@@ -394,7 +396,7 @@ sudo -u "$NEW_USER" arch-update --tray --enable 2>/dev/null || true
 cp -r /repo /var/cache/anarchy-repo
 cat >> /etc/pacman.conf <<REPO
 
-[anarchy]
+[anarchy-repo]
 SigLevel = Optional TrustAll
 Server = file:///var/cache/anarchy-repo
 REPO
