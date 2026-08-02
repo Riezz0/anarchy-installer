@@ -569,7 +569,10 @@ class InstallPage(Adw.NavigationPage):
         buf = self.terminal.get_buffer()
         for char in text:
             if char == "\r":
-                self._line_buffer = ""
+                if self._line_buffer:
+                    end = buf.get_end_iter()
+                    buf.insert(end, self._line_buffer + "\n", -1)
+                    self._line_buffer = ""
             elif char == "\x1b":
                 pass
             else:
