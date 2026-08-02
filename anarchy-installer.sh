@@ -320,6 +320,8 @@ genfstab -U /mnt >> /mnt/etc/fstab
 # ------------------------------------------------------------
 info "Configuring system in chroot..."
 
+cp -r "$REPO_SRC" /mnt/repo
+
 ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
 
 printf 'ROOT_PASS=%s\n' "$ROOT_PASS" >> /mnt/.install_env
