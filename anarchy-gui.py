@@ -861,12 +861,18 @@ class InstallPage(Adw.NavigationPage):
         for char in text:
             if char == "\r":
                 if self._progress_mark is not None:
+                    start = buf.get_iter_at_mark(self._progress_mark)
                     end = buf.get_end_iter()
-                    buf.delete(self._progress_mark, end)
+                    buf.delete(start, end)
                 if self._line_buffer:
                     end = buf.get_end_iter()
                     buf.insert(end, self._line_buffer, -1)
                     self._progress_mark = buf.create_mark(None, end, True)
+                    m = re.search(r'(\d+)%', self._line_buffer)
+                    if m and self.progress_bar:
+                        pct = int(m.group(1)) / 100.0
+                        GLib.idle_add(self.progress_bar.set_fraction, pct)
+                        GLib.idle_add(self.progress_bar.set_text, f"{m.group(1)}%")
                 self._line_buffer = ""
             elif char == "\n":
                 self._progress_mark = None
@@ -943,6 +949,23 @@ class InstallPage(Adw.NavigationPage):
         os.set_blocking(self._proc.stdout.fileno(), False)
         GLib.timeout_add(50, self._poll_output)
 
+    _PHASE_MARKERS = {
+        "Partitioning":          (0.05, "Partitioning drive..."),
+        "Formatting":            (0.10, "Formatting partitions..."),
+        "Btrfs subvolumes":      (0.15, "Creating Btrfs subvolumes..."),
+        "Cloning system":        (0.20, "Cloning system to target..."),
+        "Configuring target":    (0.70, "Configuring target system..."),
+        "Installing Kernel":     (0.72, "Installing kernel & packages..."),
+        "Configuring Grub":      (0.78, "Configuring GRUB..."),
+        "Creating Users":        (0.82, "Creating users..."),
+        "Installing AUR":        (0.86, "Installing AUR helper..."),
+        "Enabling Services":     (0.90, "Enabling services..."),
+        "Cloning Dotfiles":      (0.92, "Cloning dotfiles..."),
+        "Installing Fonts":      (0.94, "Installing fonts..."),
+        "Configuring SDDM":     (0.96, "Configuring SDDM..."),
+        "Configuration complete": (1.0, "Done"),
+    }
+
     def _poll_output(self):
         if self._proc is None:
             return False
@@ -956,8 +979,13 @@ class InstallPage(Adw.NavigationPage):
         try:
             data = os.read(self._proc.stdout.fileno(), 4096)
             if data:
-                self._feed_text(data.decode("utf-8", errors="replace"))
-                self.progress_bar.pulse()
+                decoded = data.decode("utf-8", errors="replace")
+                self._feed_text(decoded)
+                for marker, (frac, label) in self._PHASE_MARKERS.items():
+                    if marker in decoded:
+                        GLib.idle_add(self.progress_bar.set_fraction, frac)
+                        GLib.idle_add(self.progress_bar.set_text, label)
+                        break
         except BlockingIOError:
             pass
         return True
