@@ -866,8 +866,8 @@ class InstallPage(Adw.NavigationPage):
                     buf.delete(start, end)
                 if self._line_buffer:
                     end = buf.get_end_iter()
-                    buf.insert(end, self._line_buffer, -1)
                     self._progress_mark = buf.create_mark(None, end, True)
+                    buf.insert(end, self._line_buffer, -1)
                     m = re.search(r'(\d+)%', self._line_buffer)
                     if m and self.progress_bar:
                         pct = int(m.group(1)) / 100.0
