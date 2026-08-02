@@ -181,8 +181,10 @@ set -e
 # ------------------------------------------------------------
 info "Partitioning $TARGET_DRIVE..."
 
-for mp in $(lsblk -rno MOUNTPOINT "$TARGET_DRIVE" 2>/dev/null | grep -v '^$'); do
-    umount "$mp" 2>/dev/null || true
+swapoff "$TARGET_DRIVE"* 2>/dev/null || true
+umount -R /mnt 2>/dev/null || true
+for part in $(lsblk -rno NAME "$TARGET_DRIVE" | tail -n +2); do
+    umount "/dev/$part" 2>/dev/null || true
 done
 
 sgdisk -Z "$TARGET_DRIVE" &>/dev/null
