@@ -608,14 +608,25 @@ class InstallPage(Adw.NavigationPage):
         self.progress_bar.set_text("Starting installer...")
         self.progress_bar.pulse()
 
-        cmd = ["pkexec", INSTALLER_SCRIPT, "--gui-env"]
+        root_pass = env_data.get("root_pass", "")
+        if os.geteuid() == 0:
+            cmd = [INSTALLER_SCRIPT, "--gui-env"]
+        else:
+            cmd = ["sudo", "-S", INSTALLER_SCRIPT, "--gui-env"]
+
         self._proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1
         )
+
+        if os.geteuid() != 0 and root_pass:
+            self._proc.stdin.write(root_pass + "\n")
+            self._proc.stdin.flush()
+            self._proc.stdin.close()
 
         GLib.io_add_watch(
             GLib.IOChannel.newfile(self._proc.stdout, "r"),
@@ -798,7 +809,7 @@ class AnarchyInstaller(Adw.Application):
         if not inet:
             self._show_error("No internet connection detected.\nPlease connect to the internet and try again.")
             return
-        self.nav.push_to_tag("drive")
+        self.nav.push_by_tag("drive")
 
     def _on_drive_next(self, *args):
         drive = self.drive_page.selected_drive
@@ -806,7 +817,7 @@ class AnarchyInstaller(Adw.Application):
             self._show_error("Please select a target drive.")
             return
         self.config["drive"] = drive
-        self.nav.push_to_tag("user")
+        self.nav.push_by_tag("user")
 
     def _on_user_next(self, *args):
         up = self.user_page
@@ -838,7 +849,7 @@ class AnarchyInstaller(Adw.Application):
             "user_pass": user_pass,
             "timezone": timezone,
         })
-        self.nav.push_to_tag("system")
+        self.nav.push_by_tag("system")
 
     def _on_system_next(self, *args):
         sp = self.system_page
@@ -865,7 +876,7 @@ class AnarchyInstaller(Adw.Application):
         })
 
         self.summary_page.update_summary(self.config)
-        self.nav.push_to_tag("summary")
+        self.nav.push_by_tag("summary")
 
     def _on_install(self, *args):
         dialog = Adw.AlertDialog(

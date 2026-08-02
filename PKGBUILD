@@ -1,12 +1,12 @@
 # Maintainer: Riezz0 <https://github.com/Riezz0>
 pkgname=anarchy-installer
-pkgver=0.0.81
+pkgver=0.0.82
 pkgrel=1
 pkgdesc="Offline Arch Linux + Hyprland (UWSM) + SDDM installer with local pacman repo"
 arch=('any')
 url="https://github.com/Riezz0/anarchy-installer"
 license=('GPL-3.0-or-later')
-depends=('bash' 'gum' 'python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4' 'polkit')
+depends=('bash' 'gum' 'python' 'python-gobject' 'gtk4' 'libadwaita' 'vte4' 'sudo')
 source=("$pkgname::git+$url.git")
 sha256sums=('SKIP')
 
