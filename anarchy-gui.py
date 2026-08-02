@@ -578,10 +578,15 @@ class InstallPage(Adw.NavigationPage):
                 end = buf.get_end_iter()
                 buf.insert(end, self._line_buffer, -1)
                 self._line_buffer = ""
-        if self._line_buffer:
-            end = buf.get_end_iter()
-            buf.insert(end, self._line_buffer, -1)
-            self._line_buffer = ""
+        self.terminal.scroll_mark_onscreen(buf.get_insert())
+
+    def _flush_line(self):
+        if HAS_VTE or not self._line_buffer:
+            return
+        buf = self.terminal.get_buffer()
+        end = buf.get_end_iter()
+        buf.insert(end, self._line_buffer, -1)
+        self._line_buffer = ""
         self.terminal.scroll_mark_onscreen(buf.get_insert())
 
     def apply_vte_palette(self, palette):
@@ -670,6 +675,7 @@ class InstallPage(Adw.NavigationPage):
         return True
 
     def _on_finished(self, returncode):
+        self._flush_line()
         if returncode == 0:
             self.status_label.set_markup(
                 '<span size="large" weight="bold">Installation Complete!</span>')
