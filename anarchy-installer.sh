@@ -176,6 +176,14 @@ fi
 # ============================================================
 set -e
 
+cleanup() {
+    error "Script failed. Cleaning up..."
+    kill $(lsof -t +D /mnt 2>/dev/null) 2>/dev/null || true
+    sleep 1
+    umount -R /mnt 2>/dev/null || true
+}
+trap cleanup ERR
+
 # ------------------------------------------------------------
 #  Partitioning
 # ------------------------------------------------------------
@@ -463,6 +471,8 @@ CHEOF
 #  Cleanup
 # ------------------------------------------------------------
 rm -f /mnt/.install_env
+kill $(lsof -t +D /mnt 2>/dev/null) 2>/dev/null || true
+sleep 1
 umount -R /mnt
 
 echo
