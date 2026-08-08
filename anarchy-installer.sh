@@ -257,7 +257,7 @@ ENVEOF
 printf 'ROOT_PASS=%s\n' "$ROOT_PASS" >> /mnt/.install_env
 printf 'NEW_PASS=%s\n' "$NEW_PASS" >> /mnt/.install_env
 
-arch-chroot /mnt /bin/bash <<'CHEOF'
+arch-chroot /mnt /bin/bash <<CHEOF
 set -e
 source /.install_env
 
@@ -536,6 +536,33 @@ sudo -u "$NEW_USER" arch-update --tray --enable
 chsh -s /bin/zsh "$NEW_USER"
 chsh -s /bin/zsh root
 
+echo ":: Setting up first-boot monitor config..."
+AUTOSTART_DIR="/home/$NEW_USER/.config/autostart"
+LOCALBIN_DIR="/home/$NEW_USER/.local/bin"
+mkdir -p "$AUTOSTART_DIR"
+mkdir -p "$LOCALBIN_DIR"
+
+cat > "$LOCALBIN_DIR/hyprmon-once.sh" <<'HYPREOF'
+#!/bin/bash
+hyprmon
+rm -f "$HOME/.config/autostart/hyprmon-firstboot.desktop"
+HYPREOF
+chmod +x "$LOCALBIN_DIR/hyprmon-once.sh"
+
+cat > "$AUTOSTART_DIR/hyprmon-firstboot.desktop" <<DESKTOPEOF
+[Desktop Entry]
+Type=Application
+Name=Monitor Setup
+Comment=Configure your monitors on first boot
+Exec=$LOCALBIN_DIR/hyprmon-once.sh
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+DESKTOPEOF
+
+chown -R "$NEW_USER:users" "$LOCALBIN_DIR"
+chown -R "$NEW_USER:users" "$AUTOSTART_DIR"
+
 rm -f /.install_env
 CHEOF
 umount -R /mnt
@@ -546,6 +573,8 @@ header "Installation Complete!"
 echo
 if [[ "${GUI_MODE:-}" != "1" ]]; then
     info "Log in and run 'hyprmon' to configure your monitors."
+else
+    info "Monitor configuration will launch automatically on first login."
 fi
 
 if [[ "${GUI_MODE:-}" != "1" ]]; then

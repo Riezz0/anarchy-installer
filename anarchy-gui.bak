@@ -696,6 +696,21 @@ class SystemPage(Adw.NavigationPage):
             gpu_flow.append(child)
         card.append(gpu_flow)
 
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(8)
+        sep.set_margin_bottom(8)
+        card.append(sep)
+
+        extras_lbl = Gtk.Label(label="Extras")
+        extras_lbl.set_halign(Gtk.Align.START)
+        extras_lbl.add_css_class("anarchy-section-title")
+        card.append(extras_lbl)
+
+        self.vscodium_check = Gtk.CheckButton(label="Install VSCodium + Wal Theme")
+        self.vscodium_check.set_active(True)
+        self.vscodium_check.add_css_class("anarchy-gpu-check")
+        card.append(self.vscodium_check)
+
         outer.append(card)
         scroll.set_child(outer)
         self.set_child(scroll)
@@ -793,6 +808,8 @@ class SummaryPage(Adw.NavigationPage):
         self._make_row(self.section_system, "gpu", "GPU").set_text(gpu)
         self._make_row(self.section_system, "audio", "Audio").set_text(audio)
         self._make_row(self.section_system, "aur", "AUR Helper").set_text(data.get("aur", "?"))
+        vsc = "Yes" if data.get("vscodium") else "No"
+        self._make_row(self.section_system, "vsc", "VSCodium").set_text(vsc)
 
 
 class InstallPage(Adw.NavigationPage):
@@ -814,8 +831,6 @@ class InstallPage(Adw.NavigationPage):
 
         self.progress_bar = Gtk.ProgressBar()
         self.progress_bar.set_show_text(True)
-        self.progress_bar.set_text("Preparing...")
-        outer.append(self.progress_bar)
 
         if HAS_VTE:
             self.terminal = Vte.Terminal()
@@ -946,6 +961,7 @@ class InstallPage(Adw.NavigationPage):
             f'AUDIO="{env_data.get("audio", "pipewire")}"',
             f'AUR_HELPER="{env_data.get("aur", "none")}"',
             f'IS_EFI={str(env_data.get("is_efi", False)).lower()}',
+            f'INSTALL_VSCODIUM={str(env_data.get("vscodium", False)).lower()}',
         ]
         env_content = "\n".join(env_lines) + "\n"
         env_content += f'ROOT_PASS={env_data.get("root_pass", "")}\n'
@@ -1029,6 +1045,12 @@ class InstallPage(Adw.NavigationPage):
                 "  Please Press The Reboot Button To\n"
                 "  Reboot The System\n"
                 "========================================\n")
+            if not HAS_VTE:
+                def _scroll_to_end():
+                    adj = self.terminal.get_vadjustment()
+                    adj.set_value(adj.get_upper() - adj.get_page_size())
+                    return False
+                GLib.idle_add(_scroll_to_end)
         else:
             self.status_label.set_markup(
                 f'<span size="x-large" weight="bold" foreground="{self._theme.colors["red"]}">'
@@ -1219,6 +1241,7 @@ class AnarchyInstaller(Adw.Application):
                            else "pulseaudio pulseaudio-alsa pulseaudio-bluetooth"),
             "aur": AUR_HELPERS[sp.aur_row.get_selected()],
             "is_efi": is_efi(),
+            "vscodium": sp.vscodium_check.get_active(),
         })
 
         self.summary_page.update_summary(self.config)

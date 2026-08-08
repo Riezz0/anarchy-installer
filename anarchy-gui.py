@@ -1045,6 +1045,12 @@ class InstallPage(Adw.NavigationPage):
                 "  Please Press The Reboot Button To\n"
                 "  Reboot The System\n"
                 "========================================\n")
+            if not HAS_VTE:
+                def _scroll_to_end():
+                    adj = self.terminal.get_vadjustment()
+                    adj.set_value(adj.get_upper() - adj.get_page_size())
+                    return False
+                GLib.idle_add(_scroll_to_end)
         else:
             self.status_label.set_markup(
                 f'<span size="x-large" weight="bold" foreground="{self._theme.colors["red"]}">'
