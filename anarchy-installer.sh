@@ -474,6 +474,27 @@ USEREOF
     chown -R "$NEW_USER:users" "$FIREFOX_DIR"
 fi
 
+# --- Flatpak Dependencies (always install) ---
+FLATPAK_DEPS="org.gtk.Gtk3theme.adw-gtk3 org.gtk.Gtk3theme.adw-gtk3-dark"
+
+pacman -S --needed --noconfirm flatpak >/dev/null 2>&1 || true
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo >/dev/null 2>&1 || true
+
+echo ":: Installing Flatpak dependencies..."
+for app in $FLATPAK_DEPS; do
+    flatpak install -y --noninteractive flathub "$app" >/dev/null 2>&1 || true
+done
+
+if [[ -n "${FLATPAK_LIST:-}" ]]; then
+    echo ":: Installing selected Flatpak applications..."
+    IFS=',' read -ra FP_APPS <<< "$FLATPAK_LIST"
+    for app in "${FP_APPS[@]}"; do
+        app=$(echo "$app" | xargs)
+        [[ -z "$app" ]] && continue
+        flatpak install -y --noninteractive flathub "$app" >/dev/null 2>&1 || true
+    done
+fi
+
 echo ":: Enabling Services..."
 systemctl enable NetworkManager
 systemctl enable sddm

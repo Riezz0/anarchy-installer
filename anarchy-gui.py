@@ -25,7 +25,7 @@ INSTALLER_SCRIPT = "/usr/local/bin/anarchy-installer.sh"
 ENV_FILE = "/tmp/.anarchy_install_env"
 TERMINAL_FONT = "JetBrains Mono 11"
 
-STEPS = ["Welcome", "Drive", "User", "System", "Summary", "Install"]
+STEPS = ["Welcome", "Drive", "User", "System", "Flatpaks", "Summary", "Install"]
 
 KERNELS = ["linux", "linux-lts", "linux-zen", "linux-hardened"]
 CPUS = ["intel-ucode", "amd-ucode"]
@@ -33,6 +33,29 @@ GPUS = ["mesa", "nvidia", "nvidia-lts", "nvidia-dkms",
          "xf86-video-intel", "vulkan-radeon", "vulkan-intel"]
 AUDIO_OPTIONS = {"Pipewire": "pipewire", "Pulseaudio": "pulseaudio"}
 AUR_HELPERS = ["yay", "paru", "pikaur", "none"]
+
+FLATPAK_DEPS = [
+    ("Adw-gtk3 Theme", "org.gtk.Gtk3theme.adw-gtk3"),
+    ("Adw-gtk3-dark Theme", "org.gtk.Gtk3theme.adw-gtk3-dark"),
+]
+FLATPAK_APPS = [
+    ("LocalSend",             "org.localsend.localsend_app",       True),
+    ("Flatseal",              "com.github.tchx84.Flatseal",        True),
+    ("RPCS3 (PS3 Emulator)",  "net.rpcs3.RPCS3",                  True),
+    ("RetroArch",             "org.libretro.RetroArch",            True),
+    ("sysd-manager",          "io.github.plrigaux.sysd-manager",   True),
+    ("ProtonPlus",            "com.vysp3r.ProtonPlus",             True),
+    ("OBS Studio",            "com.obsproject.Studio",             True),
+    ("GIMP",                  "org.gimp.GIMP",                     False),
+    ("Inkscape",              "org.inkscape.Inkscape",             False),
+    ("VLC",                   "org.videolan.VLC",                  False),
+    ("Discord",               "com.discordapp.Discord",            False),
+    ("Lutris",                "net.lutris.Lutris",                 False),
+    ("qbittorrent",           "org.qbittorrent.qBittorrent",      False),
+    ("OnlyOffice",            "org.onlyoffice.desktopeditors",     False),
+    ("Peek",                  "com.uploadedlobster.peek",          False),
+    ("File Manager (Nautilus)","org.gnome.Nautilus",               False),
+]
 
 
 # ─── Pywal Theme ──────────────────────────────────────────────────────────────
@@ -720,6 +743,68 @@ class SystemPage(Adw.NavigationPage):
         return " ".join(selected) if selected else "none"
 
 
+class FlatpakPage(Adw.NavigationPage):
+    def __init__(self):
+        super().__init__()
+        self.set_title("Flatpaks")
+        self.set_tag("flatpak")
+
+        scroll = Gtk.ScrolledWindow()
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
+                        margin_top=8, margin_bottom=8,
+                        margin_start=32, margin_end=32)
+        outer.add_css_class("anarchy-page")
+
+        card = Gtk.Box(orientation=Gtk.Orientation.PIPE, spacing=8)
+        card.add_css_class("anarchy-card")
+        card.set_orientation(Gtk.Orientation.VERTICAL)
+
+        lbl = Gtk.Label()
+        lbl.set_markup('<span size="large" weight="bold">Flatpak Applications</span>')
+        lbl.set_halign(Gtk.Align.START)
+        card.append(lbl)
+
+        sub = Gtk.Label(label="Select additional applications to install via Flatpak.")
+        sub.set_halign(Gtk.Align.START)
+        sub.add_css_class("anarchy-section-title")
+        card.append(sub)
+
+        dep_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        dep_box.set_margin_top(8)
+        dep_lbl = Gtk.Label()
+        dep_lbl.set_markup('<span weight="bold" size="small">Always installed (dependencies):</span>')
+        dep_lbl.set_halign(Gtk.Align.START)
+        dep_box.append(dep_lbl)
+        for name, appid in FLATPAK_DEPS:
+            row = Gtk.Label(label=f"  {name}  ({appid})")
+            row.set_halign(Gtk.Align.START)
+            row.add_css_class("anarchy-summary-row")
+            dep_box.append(row)
+        card.append(dep_box)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(4)
+        sep.set_margin_bottom(4)
+        card.append(sep)
+
+        self.checks = {}
+        app_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        for name, appid, default in FLATPAK_APPS:
+            cb = Gtk.CheckButton(label=name)
+            cb.set_active(default)
+            cb.add_css_class("anarchy-gpu-check")
+            self.checks[appid] = cb
+            app_box.append(cb)
+        card.append(app_box)
+
+        outer.append(card)
+        scroll.set_child(outer)
+        self.set_child(scroll)
+
+    def get_selected(self):
+        return [appid for appid, cb in self.checks.items() if cb.get_active()]
+
+
 class SummaryPage(Adw.NavigationPage):
     def __init__(self):
         super().__init__()
@@ -810,6 +895,9 @@ class SummaryPage(Adw.NavigationPage):
         self._make_row(self.section_system, "aur", "AUR Helper").set_text(data.get("aur", "?"))
         vsc = "Yes" if data.get("vscodium") else "No"
         self._make_row(self.section_system, "vsc", "VSCodium").set_text(vsc)
+        flatpaks = data.get("flatpaks", [])
+        fp_count = len(flatpaks)
+        self._make_row(self.section_system, "fp", "Flatpaks").set_text(f"{fp_count} selected")
 
 
 class InstallPage(Adw.NavigationPage):
@@ -962,6 +1050,7 @@ class InstallPage(Adw.NavigationPage):
             f'AUR_HELPER="{env_data.get("aur", "none")}"',
             f'IS_EFI={str(env_data.get("is_efi", False)).lower()}',
             f'INSTALL_VSCODIUM={str(env_data.get("vscodium", False)).lower()}',
+            f'FLATPAK_LIST="{",".join(env_data.get("flatpaks", []))}"',
         ]
         env_content = "\n".join(env_lines) + "\n"
         env_content += f'ROOT_PASS={env_data.get("root_pass", "")}\n'
@@ -1091,6 +1180,7 @@ class AnarchyInstaller(Adw.Application):
         self.drive_page = DrivePage()
         self.user_page = UserPage()
         self.system_page = SystemPage()
+        self.flatpak_page = FlatpakPage()
         self.summary_page = SummaryPage()
         self.install_page = InstallPage(self.theme)
 
@@ -1098,6 +1188,7 @@ class AnarchyInstaller(Adw.Application):
         self.nav.add(self._wrap_page(self.drive_page, self._make_drive_toolbar()))
         self.nav.add(self._wrap_page(self.user_page, self._make_user_toolbar()))
         self.nav.add(self._wrap_page(self.system_page, self._make_system_toolbar()))
+        self.nav.add(self._wrap_page(self.flatpak_page, self._make_flatpak_toolbar()))
         self.nav.add(self._wrap_page(self.summary_page, self._make_summary_toolbar()))
         self.nav.add(self.install_page)
 
@@ -1170,6 +1261,12 @@ class AnarchyInstaller(Adw.Application):
         hb = self._make_header_bar("System Options")
         hb.pack_start(self._make_nav_button("Back", self._on_back))
         hb.pack_end(self._make_nav_button("  Next  ", self._on_system_next, "suggested-action"))
+        return hb
+
+    def _make_flatpak_toolbar(self):
+        hb = self._make_header_bar("Flatpak Applications")
+        hb.pack_start(self._make_nav_button("Back", self._on_back))
+        hb.pack_end(self._make_nav_button("  Next  ", self._on_flatpak_next, "suggested-action"))
         return hb
 
     def _make_summary_toolbar(self):
@@ -1246,6 +1343,12 @@ class AnarchyInstaller(Adw.Application):
 
         self.summary_page.update_summary(self.config)
         self._set_step(4)
+        self.nav.push_by_tag("flatpak")
+
+    def _on_flatpak_next(self, *args):
+        self.config["flatpaks"] = self.flatpak_page.get_selected()
+        self.summary_page.update_summary(self.config)
+        self._set_step(5)
         self.nav.push_by_tag("summary")
 
     def _on_install(self, *args):
@@ -1260,7 +1363,7 @@ class AnarchyInstaller(Adw.Application):
 
     def _on_install_confirm(self, dialog, response):
         if response == "install":
-            self._set_step(5)
+            self._set_step(6)
             self.nav.push(self.install_page)
             self.install_page.apply_vte_palette(self.theme.vte_palette())
             self.install_page.start_install(self.config)
