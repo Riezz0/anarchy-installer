@@ -375,6 +375,105 @@ SETEOF
     sed -i 's/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 fi
 
+# --- Silent Pywalfox + Firefox Theme ---
+if [[ "${INSTALL_PYWALFOX:-true}" == "true" ]]; then
+    pip install --break-system-packages pywalfox >/dev/null 2>&1 || true
+
+    PYWALFOX_VER="2.10"
+    PYWALFOX_XPI="/tmp/pywalfox.xpi"
+    curl -sL "https://github.com/Frewen/pywalfox/releases/download/v${PYWALFOX_VER}/pywalfox.xpi" \
+        -o "$PYWALFOX_XPI" 2>/dev/null || true
+
+    FIREFOX_DIR="/home/$NEW_USER/.mozilla"
+    NATIVE_HOST_DIR="$FIREFOX_DIR/native-messaging-hosts"
+    mkdir -p "$NATIVE_HOST_DIR"
+
+    PYWALFOX_BIN="$(command -v pywalfox 2>/dev/null || echo /usr/bin/pywalfox)"
+
+    cat > "$NATIVE_HOST_DIR/pywalfox.json" <<NATEOF
+{
+    "name": "pywalfox",
+    "description": "Pywalfox native messaging host",
+    "path": "$PYWALFOX_BIN",
+    "type": "stdio",
+    "allowed_extensions": ["pywalfox@frewen.cz"]
+}
+NATEOF
+
+    FIREFOX_CFG_DIR="/home/$NEW_USER/.mozilla/firefox"
+    DIST_DIR="$FIREFOX_CFG_DIR/distribution"
+    AUTOCONFIG_DIR="$DIST_DIR/autoconfig"
+    mkdir -p "$AUTOCONFIG_DIR"
+
+    cat > "$AUTOCONFIG_DIR/config-prefs.js" <<PREFEOF
+pref("general.config.filename", "firefox.cfg");
+pref("general.config.obscure_value", 0);
+pref("general.config.sandbox_enabled", false);
+PREFEOF
+
+    cat > "$AUTOCONFIG_DIR/firefox.cfg" <<CFGEOF
+// Pywalfox auto-install
+try {
+    const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+    const xr = Services.obs;
+
+    function installXPI(path) {
+        try {
+            const file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+            file.initWithPath(path);
+            if (file.exists()) {
+                const ext = Cc["@mozilla.org/addons/addon-manager;1"]
+                    .getService(Ci.amIAddonManager);
+                AddonManager.installTemporaryAddon(file);
+            }
+        } catch(e) {}
+    }
+
+    const xpi = Services.dirsvc.get("TmpD", Ci.nsIFile);
+    xpi.append("pywalfox.xpi");
+    const xhr = Cc["@mozilla.org/xhr;1"].createInstance(Ci.nsIXMLHttpRequest);
+    xhr.open("GET", "https://github.com/Frewen/pywalfox/releases/download/v${PYWALFOX_VER}/pywalfox.xpi", false);
+    xhr.responseType = "arraybuffer";
+    xhr.send();
+    if (xhr.status === 200) {
+        const stream = Cc["@mozilla.org/io/file-output-stream;1"]
+            .createInstance(Ci.nsIFileOutputStream);
+        stream.init(xpi, 0x04 | 0x08 | 0x20, 0o666, 0);
+        stream.write(xhr.response);
+        stream.close();
+        AddonManager.installTemporaryAddon(xpi);
+    }
+} catch(e) {}
+CFGEOF
+
+    cat > "$FIREFOX_CFG_DIR/profiles.ini" <<PROFEOF
+[Profile0]
+Name=default
+IsRelative=1
+Path=default-release
+Default=1
+
+[General]
+StartWithLastProfile=1
+PROFEOF
+
+    DEFAULT_PROFILE="$FIREFOX_CFG_DIR/default-release"
+    mkdir -p "$DEFAULT_PROFILE"
+
+    cat > "$DEFAULT_PROFILE/user.js" <<USEREOF
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+USEREOF
+
+    if [[ -f "$PYWALFOX_XPI" ]]; then
+        mkdir -p "$DEFAULT_PROFILE/extensions"
+        cp "$PYWALFOX_XPI" "$DEFAULT_PROFILE/extensions/pywalfox@frewen.cz.xpi"
+        rm -f "$PYWALFOX_XPI"
+    fi
+
+    chown -R "$NEW_USER:users" "$FIREFOX_DIR"
+fi
+
 echo ":: Enabling Services..."
 systemctl enable NetworkManager
 systemctl enable sddm
