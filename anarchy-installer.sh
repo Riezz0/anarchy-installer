@@ -347,6 +347,34 @@ if [ "$AUR_HELPER" != "none" ]; then
     sed -i 's/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 fi
 
+# --- Silent VSCodium Install ---
+if [[ "${INSTALL_VSCODIUM:-false}" == "true" && "$AUR_HELPER" != "none" ]]; then
+    sed -i 's/%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
+
+    sudo -u "$NEW_USER" bash -c "
+        $AUR_HELPER -S --noconfirm vscodium-bin >/dev/null 2>&1 || exit 0
+
+        SETTINGS_DIR=\"\$HOME/.config/Code - OSS/User\"
+        SETTINGS_FILE=\"\$SETTINGS_DIR/settings.json\"
+        mkdir -p \"\$SETTINGS_DIR\"
+
+        if command -v code-oss &>/dev/null; then
+            code-oss --install-extension dlasagno.wal-theme --force >/dev/null 2>&1
+        elif command -v code &>/dev/null; then
+            code --install-extension dlasagno.wal-theme --force >/dev/null 2>&1
+        fi
+
+        cat > \"\$SETTINGS_FILE\" <<SETEOF
+{
+    \"workbench.colorTheme\": \"Wal\",
+    \"wal.path\": \"\$HOME/.cache/wal/colors.json\"
+}
+SETEOF
+    " || true
+
+    sed -i 's/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+fi
+
 echo ":: Enabling Services..."
 systemctl enable NetworkManager
 systemctl enable sddm
