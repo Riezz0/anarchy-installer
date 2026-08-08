@@ -351,6 +351,9 @@ if [ "$AUR_HELPER" != "none" ]; then
     sed -i 's/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 fi
 
+# --- Optional installs (set +e so failures don't abort the script) ---
+set +e
+
 # --- Silent VSCodium Install ---
 if [[ "${INSTALL_VSCODIUM:-false}" == "true" && "$AUR_HELPER" != "none" ]]; then
     sed -i 's/%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
@@ -498,6 +501,8 @@ if [[ -n "${FLATPAK_LIST:-}" ]]; then
         flatpak install -y --noninteractive flathub "$app" >/dev/null 2>&1 || true
     done
 fi
+
+set -e
 
 echo ":: Enabling Services..."
 systemctl enable NetworkManager
