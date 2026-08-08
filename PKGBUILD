@@ -1,6 +1,6 @@
 # Maintainer: Riezz0 <https://github.com/Riezz0>
 pkgname=anarchy-installer
-pkgver=0.0.104
+pkgver=0.0.105
 pkgrel=1
 pkgdesc="Offline Arch Linux + Hyprland (UWSM) + SDDM installer with local pacman repo"
 arch=('any')

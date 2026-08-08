@@ -755,7 +755,7 @@ class FlatpakPage(Adw.NavigationPage):
                         margin_start=32, margin_end=32)
         outer.add_css_class("anarchy-page")
 
-        card = Gtk.Box(orientation=Gtk.Orientation.PIPE, spacing=8)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.add_css_class("anarchy-card")
         card.set_orientation(Gtk.Orientation.VERTICAL)
 
