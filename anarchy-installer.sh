@@ -257,9 +257,13 @@ ENVEOF
 printf 'ROOT_PASS=%s\n' "$ROOT_PASS" >> /mnt/.install_env
 printf 'NEW_PASS=%s\n' "$NEW_PASS" >> /mnt/.install_env
 
-arch-chroot /mnt /bin/bash <<CHEOF
+# Write AUR_HELPER to a file so the inner bash can source it (quoted heredoc can't expand)
+echo "AUR_HELPER=$AUR_HELPER" > /mnt/.aur_helper_env
+
+arch-chroot /mnt /bin/bash <<'CHEOF'
 set -e
 source /.install_env
+source /.aur_helper_env
 
 echo ":: Repairing cloned pacman database..."
 find /var/lib/pacman/local/ -type f -name "desc" -exec sed -i '/^%INSTALLED_DB%/,/^$/d' {} +
@@ -585,6 +589,7 @@ chown -R "$NEW_USER:users" "$LOCALBIN_DIR"
 chown -R "$NEW_USER:users" "$AUTOSTART_DIR"
 
 rm -f /.install_env
+rm -f /.aur_helper_env
 CHEOF
 umount -R /mnt
 ok "Configuration complete"
