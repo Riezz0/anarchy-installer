@@ -287,15 +287,29 @@ class PywalTheme:
 def list_drives():
     try:
         out = subprocess.check_output(
-            ["lsblk", "-dpno", "NAME,SIZE,MODEL"],
+            ["lsblk", "-rno", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL"],
             text=True, stderr=subprocess.DEVNULL).strip()
-        drives = []
+        devices = []
         for line in out.splitlines():
-            parts = line.split(None, 2)
-            if len(parts) >= 2:
-                drives.append({"name": parts[0], "size": parts[1],
-                               "model": parts[2] if len(parts) > 2 else ""})
-        return drives
+            parts = line.split(None, 5)
+            if len(parts) < 3:
+                continue
+            name, size, dtype = parts[0], parts[1], parts[2]
+            fstype = parts[3] if len(parts) > 3 else ""
+            mount = parts[4] if len(parts) > 4 else ""
+            model = parts[5] if len(parts) > 5 else ""
+            if dtype in ("disk", "part"):
+                dev = f"/dev/{name}"
+                label_parts = [dev, size, dtype.upper()]
+                if fstype and fstype not in ("loop",):
+                    label_parts.append(fstype)
+                if mount:
+                    label_parts.append(f"mounted:{mount}")
+                if model:
+                    label_parts.append(model)
+                devices.append({"name": dev, "size": size, "type": dtype,
+                                "label": "  ".join(label_parts)})
+        return devices
     except Exception:
         return []
 
@@ -526,7 +540,7 @@ class DrivePage(Adw.NavigationPage):
 
         first = None
         for d in drives:
-            rb = Gtk.CheckButton(label=f"  {d['name']}    {d['size']}    {d['model']}")
+            rb = Gtk.CheckButton(label=f"  {d['label']}")
             rb._drive_name = d["name"]
             rb.set_group(first)
             row = Gtk.Box()
@@ -539,7 +553,7 @@ class DrivePage(Adw.NavigationPage):
             rb.connect("toggled", self._on_toggle, d["name"])
             self.drive_box.append(row)
 
-        self.info_label.set_text(f"{len(drives)} drive(s) detected")
+        self.info_label.set_text(f"{len(drives)} device(s) detected")
 
     def _on_toggle(self, button, name):
         if button.get_active():

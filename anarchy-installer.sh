@@ -60,6 +60,14 @@ if [[ "${1:-}" == "--gui-env" ]]; then
     source "$ENV_FILE"
     IS_EFI=false
     [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
+
+    # If user selected a partition, find the parent disk
+    DEV_TYPE=$(lsblk -rno TYPE "$(basename "$TARGET_DRIVE")" 2>/dev/null | head -1)
+    if [[ "$DEV_TYPE" == "part" ]]; then
+        PARENT_DISK=$(lsblk -rno PKNAME "$(basename "$TARGET_DRIVE")" 2>/dev/null | head -1)
+        TARGET_DRIVE="/dev/$PARENT_DISK"
+    fi
+
     if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
     EFI_PART="${TARGET_DRIVE}${P}1"
     ROOT_PART="${TARGET_DRIVE}${P}2"
