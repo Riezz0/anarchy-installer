@@ -62,9 +62,13 @@ if [[ "${1:-}" == "--gui-env" ]]; then
     [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
 
     # If user selected a partition, find the parent disk
-    DEV_TYPE=$(lsblk -rno TYPE "$(basename "$TARGET_DRIVE")" 2>/dev/null | head -1)
+    DEV_TYPE=$(lsblk -rno TYPE "$TARGET_DRIVE" 2>/dev/null | head -1)
     if [[ "$DEV_TYPE" == "part" ]]; then
-        PARENT_DISK=$(lsblk -rno PKNAME "$(basename "$TARGET_DRIVE")" 2>/dev/null | head -1)
+        PARENT_DISK=$(lsblk -rno PKNAME "$TARGET_DRIVE" 2>/dev/null | head -1)
+        if [[ -z "$PARENT_DISK" ]]; then
+            echo "Error: Could not determine parent disk for $TARGET_DRIVE"
+            exit 1
+        fi
         TARGET_DRIVE="/dev/$PARENT_DISK"
     fi
 

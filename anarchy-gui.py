@@ -298,7 +298,7 @@ def list_drives():
             fstype = parts[3] if len(parts) > 3 else ""
             mount = parts[4] if len(parts) > 4 else ""
             model = parts[5] if len(parts) > 5 else ""
-            if dtype in ("disk", "part"):
+            if dtype == "disk":
                 dev = f"/dev/{name}"
                 label_parts = [dev, size, dtype.upper()]
                 if fstype and fstype not in ("loop",):
