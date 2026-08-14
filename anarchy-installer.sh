@@ -372,6 +372,23 @@ fi
 pacman -Syu --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
 mkinitcpio -P
 
+echo ":: Adding Anarchy Repository..."
+# Import repo key
+curl -sL https://raw.githubusercontent.com/Riezz0/anarchy-repo/main/x86_64/anarchy-repo.key | pacman-key --add - 2>/dev/null
+pacman-key --lsign-key "anarchy-repo" 2>/dev/null
+
+# Add repo to pacman.conf if not already present
+if ! grep -q "anarchy-repo" /etc/pacman.conf; then
+    echo "" >> /etc/pacman.conf
+    echo "[anarchy-repo]" >> /etc/pacman.conf
+    echo "SigLevel = Optional TrustAll" >> /etc/pacman.conf
+    echo "Server = https://raw.githubusercontent.com/Riezz0/anarchy-repo/main/x86_64" >> /etc/pacman.conf
+fi
+
+# Sync and install anarchy-welcome
+pacman -Sy --noconfirm
+pacman -S --noconfirm anarchy-welcome || echo "WARN: anarchy-welcome install failed (will be available after first boot)"
+
 echo ":: Configuring Grub..."
 if [ "$IS_EFI" = true ]; then
     grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
