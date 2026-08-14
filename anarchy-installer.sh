@@ -300,10 +300,14 @@ rm -rf /etc/mkinitcpio.conf.d
 rm -f /etc/mkinitcpio.d/*.preset
 rm -f /boot/vmlinuz* /boot/initramfs*
 
-echo "MODULES=(btrfs)" > /etc/mkinitcpio.conf
+INITRAMFS_MODULES="btrfs amdgpu i915"
+if [[ "$GPU_PKGS" == *nvidia* ]]; then
+    INITRAMFS_MODULES+=" nvidia nvidia_modeset nvidia_uvm nvidia_drm"
+fi
+echo "MODULES=($INITRAMFS_MODULES)" > /etc/mkinitcpio.conf
 echo "BINARIES=()" >> /etc/mkinitcpio.conf
 echo "FILES=()" >> /etc/mkinitcpio.conf
-echo "HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)" >> /etc/mkinitcpio.conf
+echo "HOOKS=(base udev autodetect modconf kms microcode keyboard keymap consolefont block filesystems fsck)" >> /etc/mkinitcpio.conf
 
 echo ":: Removing Live User configs..."
 userdel -f -r liveuser 2>/dev/null || true
@@ -326,7 +330,7 @@ else
     pacman -Rns --noconfirm pipewire pipewire-pulse pipewire-alsa pipewire-jack pipewire-zeroconf wireplumber 2>/dev/null || true
 fi
 
-pacman -Sy --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
+pacman -Syu --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
 mkinitcpio -P
 
 echo ":: Configuring Grub..."
@@ -373,6 +377,10 @@ if [ "$AUR_HELPER" != "none" ]; then
     # Revert to password-based sudo
     sed -i 's/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 fi
+
+echo ":: Creating git directory..."
+mkdir -p "/home/$NEW_USER/git"
+chown -R "$NEW_USER:users" "/home/$NEW_USER/git"
 
 echo ":: Enabling Services..."
 systemctl enable NetworkManager
