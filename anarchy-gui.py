@@ -531,10 +531,15 @@ class DrivePage(Adw.NavigationPage):
         card.append(self.header_label)
 
         warn = Gtk.Label()
-        warn.set_markup('<span weight="bold">&#9888;  The selected drive will be completely wiped</span>')
+        warn.set_markup('<span weight="bold">&#9888;  Choose how to use the selected drive</span>')
         warn.set_halign(Gtk.Align.START)
         warn.add_css_class("anarchy-warn")
         card.append(warn)
+
+        self.erase_check = Gtk.CheckButton(label="  Erase entire disk and create new partitions")
+        self.erase_check.set_active(True)
+        self.erase_check.add_css_class("anarchy-gpu-check")
+        card.append(self.erase_check)
 
         self.selected_drive = None
         self.selected_disk = None
@@ -637,6 +642,9 @@ class DrivePage(Adw.NavigationPage):
 
     def _on_back_to_drives(self, *args):
         self.load_drives()
+
+    def get_install_mode(self):
+        return "erase" if self.erase_check.get_active() else "partition"
 
 
 class UserPage(Adw.NavigationPage):
@@ -816,9 +824,10 @@ class SummaryPage(Adw.NavigationPage):
         outer.append(lbl)
 
         warn = Gtk.Label()
-        warn.set_markup('<span weight="bold">&#9888;  This will WIPE the selected drive</span>')
+        warn.set_markup('<span weight="bold">&#9888;  This will modify the selected drive</span>')
         warn.set_halign(Gtk.Align.START)
         warn.add_css_class("anarchy-warn")
+        self._warn_label = warn
         outer.append(warn)
 
         self.section_user = self._make_section(outer)
@@ -862,6 +871,13 @@ class SummaryPage(Adw.NavigationPage):
         efi_text = "UEFI" if data.get("is_efi") else "BIOS / Legacy"
         gpu = data.get("gpu_pkgs", "none")
         audio = data.get("audio", "pipewire")
+        install_mode = data.get("install_mode", "erase")
+
+        # Update warning text based on mode
+        if install_mode == "erase":
+            self._warn_label.set_markup('<span weight="bold">&#9888;  This will WIPE the selected drive</span>')
+        else:
+            self._warn_label.set_markup('<span weight="bold">&#9888;  This will FORMAT the selected partition</span>')
 
         # Clear previous rows
         for section in [self.section_user, self.section_drive, self.section_system]:
@@ -1027,6 +1043,7 @@ class InstallPage(Adw.NavigationPage):
 
         env_lines = [
             f'TARGET_DRIVE="{env_data.get("drive", "")}"',
+            f'INSTALL_MODE="{env_data.get("install_mode", "erase")}"',
             f'NEW_USER="{env_data.get("username", "")}"',
             f'NEW_HOSTNAME="{env_data.get("hostname", "")}"',
             f'TIMEZONE="{env_data.get("timezone", "UTC")}"',
@@ -1265,13 +1282,23 @@ class AnarchyInstaller(Adw.Application):
         self.nav.push_by_tag("drive")
 
     def _on_drive_next(self, *args):
-        if self.drive_page.selected_disk and not self.drive_page.selected_drive:
-            self.drive_page.load_partitions(self.drive_page.selected_disk)
-            return
-        if not self.drive_page.selected_drive:
+        if not self.drive_page.selected_disk:
             self._show_error("Please select a target drive.")
             return
+
+        if self.drive_page.get_install_mode() == "erase":
+            self.config["drive"] = self.drive_page.selected_disk
+            self.config["install_mode"] = "erase"
+            self._set_step(2)
+            self.nav.push_by_tag("user")
+            return
+
+        # Partition mode
+        if not self.drive_page.selected_drive:
+            self.drive_page.load_partitions(self.drive_page.selected_disk)
+            return
         self.config["drive"] = self.drive_page.selected_drive
+        self.config["install_mode"] = "partition"
         self._set_step(2)
         self.nav.push_by_tag("user")
 
@@ -1326,9 +1353,15 @@ class AnarchyInstaller(Adw.Application):
         self.nav.push_by_tag("summary")
 
     def _on_install(self, *args):
+        install_mode = self.config.get("install_mode", "erase")
+        drive = self.config.get("drive", "?")
+        if install_mode == "erase":
+            body = f"This will WIPE {drive} and install Arch Linux.\nThis action cannot be undone."
+        else:
+            body = f"This will FORMAT {drive} and install Arch Linux.\nThis action cannot be undone."
         dialog = Adw.AlertDialog(
             heading="Begin Installation?",
-            body=f"This will WIPE {self.config.get('drive', '?')} and install Arch Linux.\nThis action cannot be undone.")
+            body=body)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("install", "Install")
         dialog.set_response_appearance("install", Adw.ResponseAppearance.DESTRUCTIVE)

@@ -61,23 +61,35 @@ if [[ "${1:-}" == "--gui-env" ]]; then
     IS_EFI=false
     [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
 
-    # If user selected a partition, find the parent disk
-    DEV_TYPE=$(lsblk -rno TYPE "$TARGET_DRIVE" 2>/dev/null | head -1)
-    if [[ "$DEV_TYPE" == "part" ]]; then
+    INSTALL_MODE="${INSTALL_MODE:-erase}"
+
+    if [ "$INSTALL_MODE" == "erase" ]; then
+        if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
+        if [ "$IS_EFI" = true ]; then EFI_PART="${TARGET_DRIVE}${P}1"; fi
+        ROOT_PART="${TARGET_DRIVE}${P}2"
+    else
+        ROOT_PART="$TARGET_DRIVE"
         PARENT_DISK=$(lsblk -rno PKNAME "$TARGET_DRIVE" 2>/dev/null | head -1)
         if [[ -z "$PARENT_DISK" ]]; then
             echo "Error: Could not determine parent disk for $TARGET_DRIVE"
             exit 1
         fi
         TARGET_DRIVE="/dev/$PARENT_DISK"
+
+        if [ "$IS_EFI" = true ]; then
+            EFI_RAW=$(lsblk -rno NAME,FSTYPE "$TARGET_DRIVE" | awk '$2 == "vfat" {print $1; exit}')
+            if [ -n "$EFI_RAW" ]; then
+                EFI_PART="/dev/$EFI_RAW"
+            else
+                echo "Error: No FAT32 EFI partition found on $TARGET_DRIVE"
+                exit 1
+            fi
+        fi
     fi
 
-    if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
-    EFI_PART="${TARGET_DRIVE}${P}1"
-    ROOT_PART="${TARGET_DRIVE}${P}2"
     set -e
     echo "[GUI] Sourced config from $ENV_FILE"
-    echo "[GUI] Drive: $TARGET_DRIVE | EFI: $IS_EFI | User: $NEW_USER"
+    echo "[GUI] Drive: $TARGET_DRIVE | Mode: $INSTALL_MODE | EFI: $IS_EFI | User: $NEW_USER"
     export GUI_MODE=1
 else
     # --- 1. Checks ---
@@ -109,19 +121,33 @@ else
     [ -z "$TARGET_DISK" ] && exit 1
     echo "  Selected disk: $(gum style --foreground "$C_TEAL" "$TARGET_DISK")"
     echo
-    TARGET_DRIVE=$(lsblk -rno NAME,SIZE,FSTYPE "$TARGET_DISK" | awk '$3 != "swap" && $3 != "" {print $1, $2, $3}' | gum choose --header "Select partition on $TARGET_DISK" | awk '{print $1}')
-    [ -z "$TARGET_DRIVE" ] && exit 1
-    TARGET_DRIVE="/dev/$TARGET_DRIVE"
-    # Resolve partition to parent disk for partitioning
-    PARENT_DISK=$(lsblk -rno PKNAME "$TARGET_DRIVE" 2>/dev/null | head -1)
-    if [[ -n "$PARENT_DISK" ]]; then
-        TARGET_DISK="/dev/$PARENT_DISK"
+
+    INSTALL_MODE=$(gum choose --header "Installation Type" "Erase entire disk" "Install on existing partition")
+    if [ "$INSTALL_MODE" == "Erase entire disk" ]; then
+        INSTALL_MODE="erase"
+        TARGET_DRIVE="$TARGET_DISK"
+        if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
+        if [ "$IS_EFI" = true ]; then EFI_PART="${TARGET_DRIVE}${P}1"; fi
+        ROOT_PART="${TARGET_DRIVE}${P}2"
+        ok "Selected: $TARGET_DRIVE (will be wiped)"
+    else
+        INSTALL_MODE="partition"
+        TARGET_DRIVE="$TARGET_DISK"
+        ROOT_PART=$(lsblk -rno NAME,SIZE,FSTYPE "$TARGET_DISK" | awk '$3 != "swap" && $3 != "" {print $1, $2, $3}' | gum choose --header "Select root partition on $TARGET_DISK" | awk '{print $1}')
+        [ -z "$ROOT_PART" ] && exit 1
+        ROOT_PART="/dev/$ROOT_PART"
+
+        if [ "$IS_EFI" = true ]; then
+            EFI_RAW=$(lsblk -rno NAME,FSTYPE "$TARGET_DISK" | awk '$2 == "vfat" {print $1; exit}')
+            if [ -n "$EFI_RAW" ]; then
+                EFI_PART="/dev/$EFI_RAW"
+            else
+                fail "No FAT32 EFI partition found on $TARGET_DISK. Create one first."
+                exit 1
+            fi
+        fi
+        ok "Selected: $ROOT_PART"
     fi
-    TARGET_DRIVE="$TARGET_DISK"
-    if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
-    EFI_PART="${TARGET_DRIVE}${P}1"
-    ROOT_PART="${TARGET_DRIVE}${P}2"
-    ok "Selected: $TARGET_DRIVE"
     echo
 
     # --- 4. User Configuration ---
@@ -184,13 +210,22 @@ else
     echo "  $(gum style --foreground "$C_SUBTEXT" "Hostname:")  $(gum style --foreground "$C_WHITE" --bold "$NEW_HOSTNAME")"
     echo "  $(gum style --foreground "$C_SUBTEXT" "Timezone:")  $(gum style --foreground "$C_WHITE" "$TIMEZONE")"
     echo
-    echo "  $(gum style --foreground "$C_SUBTEXT" "Drive:")     $(gum style --foreground "$C_YELLOW" --bold "$TARGET_DRIVE")"
+    if [ "$INSTALL_MODE" == "erase" ]; then
+        echo "  $(gum style --foreground "$C_SUBTEXT" "Drive:")     $(gum style --foreground "$C_YELLOW" --bold "$TARGET_DRIVE")"
+    else
+        echo "  $(gum style --foreground "$C_SUBTEXT" "Root:")      $(gum style --foreground "$C_YELLOW" --bold "$ROOT_PART")"
+        echo "  $(gum style --foreground "$C_SUBTEXT" "Disk:")      $(gum style --foreground "$C_SUBTEXT" "$TARGET_DRIVE")"
+    fi
     echo "  $(gum style --foreground "$C_SUBTEXT" "Boot Mode:") $(gum style --foreground "$C_TEAL" "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")"
     echo
     echo "  $(gum style --foreground "$C_SUBTEXT" "Kernel:")    $(gum style --foreground "$C_MAUVE" --bold "$KERNEL")"
     echo "  $(gum style --foreground "$C_SUBTEXT" "AUR:")       $(gum style --foreground "$C_MAUVE" "$AUR_HELPER")"
     echo
-    gum confirm --affirmative "Proceed" --negative "Abort" "  ⚠  This will WIPE $TARGET_DRIVE. Continue?" || exit 1
+    if [ "$INSTALL_MODE" == "erase" ]; then
+        gum confirm --affirmative "Proceed" --negative "Abort" "  ⚠  This will WIPE $TARGET_DRIVE. Continue?" || exit 1
+    else
+        gum confirm --affirmative "Proceed" --negative "Abort" "  ⚠  This will FORMAT $ROOT_PART. Continue?" || exit 1
+    fi
     echo
 
     set -e
@@ -198,22 +233,26 @@ fi
 # --- EXECUTION ---
 
 # --- Step 1: Partitioning ---
-step "Partitioning $TARGET_DRIVE..."
-sgdisk -Z $TARGET_DRIVE
-if [ "$IS_EFI" = true ]; then
-    sgdisk -n 1:0:+512M -t 1:ef00 $TARGET_DRIVE
-else
-    sgdisk -n 1:0:+1M -t 1:ef02 $TARGET_DRIVE
+if [ "$INSTALL_MODE" == "erase" ]; then
+    step "Partitioning $TARGET_DRIVE..."
+    sgdisk -Z $TARGET_DRIVE
+    if [ "$IS_EFI" = true ]; then
+        sgdisk -n 1:0:+512M -t 1:ef00 $TARGET_DRIVE
+    else
+        sgdisk -n 1:0:+1M -t 1:ef02 $TARGET_DRIVE
+    fi
+    sgdisk -n 2:0:0 -t 2:8300 $TARGET_DRIVE
+    partprobe $TARGET_DRIVE
+    sleep 2
+    ok "Partitions created"
+    echo
 fi
-sgdisk -n 2:0:0 -t 2:8300 $TARGET_DRIVE
-partprobe $TARGET_DRIVE
-sleep 2
-ok "Partitions created"
-echo
 
 # --- Step 2: Formatting ---
 step "Formatting partitions..."
-if [ "$IS_EFI" = true ]; then mkfs.vfat -F 32 "$EFI_PART"; fi
+if [ "$INSTALL_MODE" == "erase" ]; then
+    if [ "$IS_EFI" = true ]; then mkfs.vfat -F 32 "$EFI_PART"; fi
+fi
 mkfs.btrfs -L ARCH_ROOT -f "$ROOT_PART"
 ok "Filesystems formatted"
 echo
