@@ -284,10 +284,39 @@ class PywalTheme:
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+_EXCLUDE_DISK_PREFIXES = ("zram", "loop", "dm-", "ram", "sr", "fd")
+
+def _is_excluded(name):
+    base = name.split("/")[-1]
+    return any(base.startswith(p) for p in _EXCLUDE_DISK_PREFIXES)
+
 def list_drives():
     try:
         out = subprocess.check_output(
-            ["lsblk", "-rno", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL"],
+            ["lsblk", "-rno", "NAME,SIZE,TYPE,MODEL"],
+            text=True, stderr=subprocess.DEVNULL).strip()
+        devices = []
+        for line in out.splitlines():
+            parts = line.split(None, 4)
+            if len(parts) < 3:
+                continue
+            name, size, dtype = parts[0], parts[1], parts[2]
+            model = parts[4] if len(parts) > 4 else ""
+            if dtype == "disk" and not _is_excluded(name):
+                dev = f"/dev/{name}"
+                label_parts = [dev, size]
+                if model:
+                    label_parts.append(model)
+                devices.append({"name": dev, "size": size,
+                                "label": "  ".join(label_parts)})
+        return devices
+    except Exception:
+        return []
+
+def list_partitions(disk):
+    try:
+        out = subprocess.check_output(
+            ["lsblk", "-rno", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT", disk],
             text=True, stderr=subprocess.DEVNULL).strip()
         devices = []
         for line in out.splitlines():
@@ -297,18 +326,18 @@ def list_drives():
             name, size, dtype = parts[0], parts[1], parts[2]
             fstype = parts[3] if len(parts) > 3 else ""
             mount = parts[4] if len(parts) > 4 else ""
-            model = parts[5] if len(parts) > 5 else ""
-            if dtype == "disk":
-                dev = f"/dev/{name}"
-                label_parts = [dev, size, dtype.upper()]
-                if fstype and fstype not in ("loop",):
-                    label_parts.append(fstype)
-                if mount:
-                    label_parts.append(f"mounted:{mount}")
-                if model:
-                    label_parts.append(model)
-                devices.append({"name": dev, "size": size, "type": dtype,
-                                "label": "  ".join(label_parts)})
+            if dtype != "part":
+                continue
+            if _is_excluded(name):
+                continue
+            dev = f"/dev/{name}"
+            label_parts = [dev, size]
+            if fstype:
+                label_parts.append(fstype)
+            if mount:
+                label_parts.append(f"mounted:{mount}")
+            devices.append({"name": dev, "size": size,
+                            "label": "  ".join(label_parts)})
         return devices
     except Exception:
         return []
@@ -496,10 +525,10 @@ class DrivePage(Adw.NavigationPage):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         card.add_css_class("anarchy-card")
 
-        lbl = Gtk.Label()
-        lbl.set_markup('<span size="large" weight="bold">Select Target Drive</span>')
-        lbl.set_halign(Gtk.Align.START)
-        card.append(lbl)
+        self.header_label = Gtk.Label()
+        self.header_label.set_markup('<span size="large" weight="bold">Select Target Drive</span>')
+        self.header_label.set_halign(Gtk.Align.START)
+        card.append(self.header_label)
 
         warn = Gtk.Label()
         warn.set_markup('<span weight="bold">&#9888;  The selected drive will be completely wiped</span>')
@@ -508,6 +537,7 @@ class DrivePage(Adw.NavigationPage):
         card.append(warn)
 
         self.selected_drive = None
+        self.selected_disk = None
         self.drive_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         card.append(self.drive_box)
 
@@ -516,6 +546,13 @@ class DrivePage(Adw.NavigationPage):
         self.info_label.add_css_class("caption")
         self.info_label.add_css_class("dim-label")
         card.append(self.info_label)
+
+        self.back_btn = Gtk.Button(label="Back to Drives")
+        self.back_btn.add_css_class("flat")
+        self.back_btn.set_halign(Gtk.Align.START)
+        self.back_btn.set_visible(False)
+        self.back_btn.connect("clicked", self._on_back_to_drives)
+        card.append(self.back_btn)
 
         outer.append(card)
         scroll.set_child(outer)
@@ -531,11 +568,15 @@ class DrivePage(Adw.NavigationPage):
     def load_drives(self):
         self._clear_box(self.drive_box)
         self.selected_drive = None
+        self.selected_disk = None
+        self.back_btn.set_visible(False)
+        self.header_label.set_markup('<span size="large" weight="bold">Select Target Drive</span>')
         drives = list_drives()
         if not drives:
             lbl = Gtk.Label(label="No drives detected")
             lbl.add_css_class("error")
             self.drive_box.append(lbl)
+            self.info_label.set_text("")
             return
 
         first = None
@@ -549,15 +590,53 @@ class DrivePage(Adw.NavigationPage):
             if first is None:
                 first = rb
                 rb.set_active(True)
-                self.selected_drive = d["name"]
-            rb.connect("toggled", self._on_toggle, d["name"])
+                self.selected_disk = d["name"]
+            rb.connect("toggled", self._on_drive_toggle, d["name"])
             self.drive_box.append(row)
 
-        self.info_label.set_text(f"{len(drives)} device(s) detected")
+        self.info_label.set_text(f"{len(drives)} drive(s) detected — click Next to see partitions")
+
+    def load_partitions(self, disk):
+        self._clear_box(self.drive_box)
+        self.selected_drive = None
+        self.selected_disk = disk
+        self.back_btn.set_visible(True)
+        self.header_label.set_markup(f'<span size="large" weight="bold">Partitions on {disk}</span>')
+        partitions = list_partitions(disk)
+        if not partitions:
+            lbl = Gtk.Label(label="No partitions found on this drive")
+            lbl.add_css_class("error")
+            self.drive_box.append(lbl)
+            self.info_label.set_text("")
+            return
+
+        first = None
+        for p in partitions:
+            rb = Gtk.CheckButton(label=f"  {p['label']}")
+            rb._drive_name = p["name"]
+            rb.set_group(first)
+            row = Gtk.Box()
+            row.add_css_class("anarchy-drive-row")
+            row.append(rb)
+            if first is None:
+                first = rb
+                rb.set_active(True)
+                self.selected_drive = p["name"]
+            rb.connect("toggled", self._on_toggle, p["name"])
+            self.drive_box.append(row)
+
+        self.info_label.set_text(f"{len(partitions)} partition(s) on {disk}")
+
+    def _on_drive_toggle(self, button, name):
+        if button.get_active():
+            self.selected_disk = name
 
     def _on_toggle(self, button, name):
         if button.get_active():
             self.selected_drive = name
+
+    def _on_back_to_drives(self, *args):
+        self.load_drives()
 
 
 class UserPage(Adw.NavigationPage):
@@ -1186,6 +1265,9 @@ class AnarchyInstaller(Adw.Application):
         self.nav.push_by_tag("drive")
 
     def _on_drive_next(self, *args):
+        if self.drive_page.selected_disk and not self.drive_page.selected_drive:
+            self.drive_page.load_partitions(self.drive_page.selected_disk)
+            return
         if not self.drive_page.selected_drive:
             self._show_error("Please select a target drive.")
             return

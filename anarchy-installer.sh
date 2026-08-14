@@ -105,9 +105,20 @@ else
     # --- 3. Drive Selection ---
     section "Drive Selection"
     echo
-    TARGET_DRIVE=$(lsblk -dpno NAME,SIZE | gum choose --header "Select target drive" | awk '{print $1}')
+    TARGET_DISK=$(lsblk -dpno NAME,SIZE,MODEL | grep -v -E '/(zram|loop|dm-|ram|sr|fd)[0-9]*' | gum choose --header "Select target drive" | awk '{print $1}')
+    [ -z "$TARGET_DISK" ] && exit 1
+    echo "  Selected disk: $(gum style --foreground "$C_TEAL" "$TARGET_DISK")"
+    echo
+    TARGET_DRIVE=$(lsblk -rno NAME,SIZE,FSTYPE "$TARGET_DISK" | awk '$3 != "swap" && $3 != "" {print $1, $2, $3}' | gum choose --header "Select partition on $TARGET_DISK" | awk '{print $1}')
     [ -z "$TARGET_DRIVE" ] && exit 1
-    if [[ $TARGET_DRIVE =~ [0-9]$ ]]; then P="p"; else P=""; fi
+    TARGET_DRIVE="/dev/$TARGET_DRIVE"
+    # Resolve partition to parent disk for partitioning
+    PARENT_DISK=$(lsblk -rno PKNAME "$TARGET_DRIVE" 2>/dev/null | head -1)
+    if [[ -n "$PARENT_DISK" ]]; then
+        TARGET_DISK="/dev/$PARENT_DISK"
+    fi
+    TARGET_DRIVE="$TARGET_DISK"
+    if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
     EFI_PART="${TARGET_DRIVE}${P}1"
     ROOT_PART="${TARGET_DRIVE}${P}2"
     ok "Selected: $TARGET_DRIVE"
