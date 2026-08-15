@@ -53,6 +53,15 @@ info() {
 # --- 0. Safety Cleanup ---
 umount -R /mnt &>/dev/null
 
+# --- Helper: Check if we're running from a disk ---
+get_boot_disk() {
+    local root_dev
+    root_dev=$(findmnt -n -o SOURCE / 2>/dev/null | head -1)
+    if [ -n "$root_dev" ]; then
+        lsblk -rno PKNAME "$root_dev" 2>/dev/null | head -1
+    fi
+}
+
 # --- GUI Mode: skip TUI, source env vars ---
 if [[ "${1:-}" == "--gui-env" ]]; then
     ENV_FILE="/tmp/.anarchy_install_env"
@@ -62,6 +71,18 @@ if [[ "${1:-}" == "--gui-env" ]]; then
     [[ -d "/sys/firmware/efi" ]] && IS_EFI=true
 
     INSTALL_MODE="${INSTALL_MODE:-erase}"
+
+    # Safety check: don't install to the disk we're running from
+    BOOT_DISK=$(get_boot_disk)
+    if [ "$INSTALL_MODE" == "erase" ]; then
+        CHECK_DRIVE="$TARGET_DRIVE"
+    else
+        CHECK_DRIVE="$TARGET_DRIVE"
+    fi
+    if [ -n "$BOOT_DISK" ] && [ "$(basename "$CHECK_DRIVE")" == "$BOOT_DISK" ]; then
+        echo "Error: Cannot install to the disk you're currently running from!"
+        exit 1
+    fi
 
     if [ "$INSTALL_MODE" == "erase" ]; then
         if [[ "$TARGET_DRIVE" =~ [0-9]$ ]]; then P="p"; else P=""; fi
@@ -119,6 +140,14 @@ else
     echo
     TARGET_DISK=$(lsblk -dpno NAME,SIZE,MODEL | grep -v -E '/(zram|loop|dm-|ram|sr|fd)[0-9]*' | gum choose --header "Select target drive" | awk '{print $1}')
     [ -z "$TARGET_DISK" ] && exit 1
+
+    # Safety check: don't install to the disk we're running from
+    BOOT_DISK=$(get_boot_disk)
+    if [ -n "$BOOT_DISK" ] && [ "$(basename "$TARGET_DISK")" == "$BOOT_DISK" ]; then
+        fail "Cannot install to the disk you're currently running from!"
+        exit 1
+    fi
+
     echo "  Selected disk: $(gum style --foreground "$C_TEAL" "$TARGET_DISK")"
     echo
 
@@ -141,6 +170,16 @@ else
             EFI_RAW=$(lsblk -rno NAME,FSTYPE "$TARGET_DISK" | awk '$2 == "vfat" {print $1; exit}')
             if [ -n "$EFI_RAW" ]; then
                 EFI_PART="/dev/$EFI_RAW"
+                # Check for other Linux installations on this disk
+                OTHER_LINUX_COUNT=$(lsblk -rno NAME,TYPE,FSTYPE "$TARGET_DISK" | awk '$2 == "part" && $3 == "linux filesystem" {print $1}' | grep -cv "$(basename "$ROOT_PART")" 2>/dev/null || echo "0")
+                if [ "$OTHER_LINUX_COUNT" -gt 0 ]; then
+                    echo
+                    gum style --foreground "$C_YELLOW" --bold "  ⚠  WARNING: This disk has other Linux partitions."
+                    gum style --foreground "$C_SUBTEXT" "     The EFI partition ($EFI_PART) will be shared with other installations."
+                    gum style --foreground "$C_SUBTEXT" "     Other kernels/initramfs files on the EFI partition will be preserved."
+                    gum confirm --affirmative "Continue" --negative "Abort" "     Continue with shared EFI?" || exit 1
+                    echo
+                fi
             else
                 fail "No FAT32 EFI partition found on $TARGET_DISK. Create one first."
                 exit 1
@@ -294,7 +333,8 @@ echo
 
 # --- Step 5: Configuration (Chroot) ---
 step "Configuring target system..."
-genfstab -U /mnt >> /mnt/etc/fstab
+# Replace fstab instead of appending to avoid duplicates from cloned system
+genfstab -U /mnt > /mnt/etc/fstab
 cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
 
 partprobe $TARGET_DRIVE
@@ -306,6 +346,7 @@ ROOT_UUID=$(lsblk -no UUID $ROOT_PART)
 cat > /mnt/.install_env <<ENVEOF
 TARGET_DRIVE="$TARGET_DRIVE"
 IS_EFI=$IS_EFI
+INSTALL_MODE=$INSTALL_MODE
 ROOT_UUID="$ROOT_UUID"
 KERNEL="$KERNEL"
 CPU="$CPU"
@@ -337,7 +378,14 @@ echo ":: Cleaning boot config..."
 pacman -Rns --noconfirm archiso 2>/dev/null || true
 rm -rf /etc/mkinitcpio.conf.d
 rm -f /etc/mkinitcpio.d/*.preset
-rm -f /boot/vmlinuz* /boot/initramfs*
+
+# In partition mode, only remove files for the selected kernel to preserve other installations
+# In erase mode, we can safely remove everything since we created the partition
+if [ "$INSTALL_MODE" == "erase" ]; then
+    rm -f /boot/vmlinuz* /boot/initramfs*
+else
+    rm -f /boot/vmlinuz-$KERNEL* /boot/initramfs-$KERNEL*
+fi
 
 INITRAMFS_MODULES="btrfs amdgpu i915"
 if [[ "$GPU_PKGS" == *nvidia* ]]; then
@@ -393,7 +441,13 @@ echo ":: Configuring Grub..."
 if [ "$IS_EFI" = true ]; then
     grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
 else
-    grub-install --target=i386-pc "$TARGET_DRIVE" --recheck
+    if [ "$INSTALL_MODE" == "erase" ]; then
+        # In erase mode, safe to install to the whole disk MBR
+        grub-install --target=i386-pc "$TARGET_DRIVE" --recheck
+    else
+        # In partition mode, install to the partition to avoid overwriting other OS bootloaders
+        grub-install --target=i386-pc "$ROOT_PART" --recheck
+    fi
 fi
 
 sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
