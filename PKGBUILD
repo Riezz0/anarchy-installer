@@ -1,6 +1,6 @@
 # Maintainer: Riezz0 <https://github.com/Riezz0>
 pkgname=anarchy-installer
-pkgver=0.0.116
+pkgver=0.0.117
 pkgrel=1
 pkgdesc="Offline Arch Linux + Hyprland (UWSM) + SDDM installer with local pacman repo"
 arch=('any')
@@ -24,4 +24,6 @@ pkgver() {
 package() {
     install -Dm755 "$srcdir/$pkgname/anarchy-installer.sh" \
         "$pkgdir/usr/local/bin/anarchy-installer.sh"
+    install -Dm755 "$srcdir/$pkgname/anarchy-start.sh" \
+        "$pkgdir/usr/local/bin/anarchy-start.sh"
 }
