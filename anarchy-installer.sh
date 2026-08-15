@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Trap errors so the window doesn't just close
-trap 'echo "ERROR on line $LINENO: $BASH_COMMAND"; read -p "Press Enter to exit..."' ERR
-
 # --- Color Palette (Tokyo Night) ---
 C_RED="#f7768e"      # color1
 C_GREEN="#9ece6a"    # color2
@@ -67,8 +64,7 @@ get_boot_disk() {
 
 # --- 1. Checks ---
 if [[ $EUID -ne 0 ]]; then
-    echo "Error: Run with sudo!"
-    read -p "Press Enter to exit..."
+    fail "Run with sudo!"
     exit 1
 fi
 
@@ -78,11 +74,8 @@ echo
 
 step "Checking internet connection..."
 if ! ping -c 1 8.8.8.8 &>/dev/null; then
-    if ! ping -c 1 1.1.1.1 &>/dev/null; then
-        fail "Internet connection required."
-        read -p "Press Enter to exit..."
-        exit 1
-    fi
+    fail "Internet connection required."
+    exit 1
 fi
 ok "Internet connected"
 echo
@@ -367,13 +360,15 @@ echo ":: Installing Kernel, Drivers, and Core Packages..."
 KERNEL_HEADERS="${KERNEL}-headers"
 [[ "$KERNEL" == "linux" ]] && KERNEL_HEADERS="linux-headers"
 
+# Remove conflicting audio packages first
 if [ "$AUDIO" = "pipewire" ]; then
     pacman -Rns --noconfirm pulseaudio pulseaudio-bluetooth pulseaudio-zeroconf pulseaudio-alsa 2>/dev/null || true
 else
     pacman -Rns --noconfirm pipewire pipewire-pulse pipewire-alsa pipewire-jack pipewire-zeroconf wireplumber 2>/dev/null || true
 fi
 
-pacman -Syu --noconfirm $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
+# Install packages without full system upgrade to avoid live ISO conflicts
+pacman -S --noconfirm --needed $KERNEL $KERNEL_HEADERS $CPU $GPU_PKGS $AUDIO_PKGS linux-firmware btrfs-progs grub $([ "$IS_EFI" = true ] && echo "efibootmgr")
 mkinitcpio -P
 
 echo ":: Adding Anarchy Repository..."

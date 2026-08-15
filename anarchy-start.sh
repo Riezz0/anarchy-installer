@@ -6,4 +6,4 @@
 kitty --class=hyprmon -e hyprmon
 
 # Once hyprmon exits, launch installer (hold keeps window open on exit)
-kitty --class=anarchy-installer --hold -e bash -c "sudo /usr/local/bin/anarchy-installer.sh; read"
+kitty --class=anarchy-installer -e bash -c "sudo /usr/local/bin/anarchy-installer.sh; read"
