@@ -22,6 +22,7 @@ if [[ ! -x "$REPO_ROOT/repo-maker.sh" ]]; then
 fi
 
 mkdir -p "$PACKAGE_DIR"
+rm -f "$PACKAGE_DIR"/anarchy-installer-*.pkg.tar.*
 
 cd "$SCRIPT_DIR"
 rm -f ./*.pkg.tar.*

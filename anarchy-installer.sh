@@ -128,6 +128,19 @@ case "$GPU_CHOICE" in
     "AMD") GPU_PACKAGES="mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon xf86-video-amdgpu"; GPU_NAME="AMD" ;;
     *) exit 1 ;;
 esac
+
+KERNEL_CHOICE=$(gum choose \
+    --header "◆ Select Linux kernel" --header.foreground "$BLUE" \
+    --cursor "➜ " --cursor.foreground "$PURPLE" \
+    "linux (standard)" "linux-lts (long-term support)" \
+    "linux-zen (performance)" "linux-hardened (security)")
+case "$KERNEL_CHOICE" in
+    "linux (standard)") KERNEL_PACKAGE="linux"; KERNEL_NAME="linux" ;;
+    "linux-lts"*) KERNEL_PACKAGE="linux-lts"; KERNEL_NAME="linux-lts" ;;
+    "linux-zen"*) KERNEL_PACKAGE="linux-zen"; KERNEL_NAME="linux-zen" ;;
+    "linux-hardened"*) KERNEL_PACKAGE="linux-hardened"; KERNEL_NAME="linux-hardened" ;;
+    *) exit 1 ;;
+esac
 DOTFILES="/home/$NEW_USER/git/anarchydots"
 
 # 5. Summary
@@ -138,6 +151,7 @@ SUMMARY=$(printf '◆ User:      %s\n◆ Timezone:  %s\n◆ Hostname:  %s\n◆ D
     "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")
 SUMMARY=$(printf '%s\n◆ Audio:     %s\n◆ Microcode: %s\n◆ GPU:       %s' \
     "$SUMMARY" "$AUDIO_NAME" "$MICROCODE_NAME" "$GPU_NAME")
+SUMMARY=$(printf '%s\n◆ Kernel:    %s' "$SUMMARY" "$KERNEL_NAME")
 gum style --foreground "$FG" --border rounded --border-foreground "$PURPLE" --padding "1 2" \
     "$SUMMARY"
 gum confirm --affirmative "Wipe drive" --negative "Cancel" \
@@ -207,7 +221,7 @@ fi
 step "Step 4/5: Cloning system..."
 if [ "$TEST_MODE" = false ]; then
     rsync -aAXhW --numeric-ids --info=progress2 \
-        --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} \
+        --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found","/home/*","/root/.cache/*","/var/tmp/*","/boot/*","/usr/lib/modules/*","/var/lib/pacman/sync/*","/usr/share/doc/*","/usr/share/man/*","/usr/share/info/*"} \
         --exclude="/var/cache/pacman/pkg/*" \
         --exclude="/var/log/*" \
         --exclude="/etc/pacman.d/gnupg/*" \
@@ -255,7 +269,7 @@ if [ "$TEST_MODE" = false ]; then
     rm -f /etc/sudoers.d/01_archiso
     
     echo ":: Installing Linux Packages..."
-    pacman -Sy --noconfirm linux linux-headers linux-firmware btrfs-progs grub sddm \
+    pacman -Sy --noconfirm "$KERNEL_PACKAGE" "${KERNEL_PACKAGE}-headers" linux-firmware btrfs-progs grub sddm \
         git stow zsh dkms base-devel sudo \
         "$MICROCODE_PACKAGE" $AUDIO_PACKAGES $GPU_PACKAGES \
         $([ "$IS_EFI" = true ] && echo "efibootmgr")
@@ -282,6 +296,7 @@ if [ "$TEST_MODE" = false ]; then
     cp "$DOTFILES/sys/grub/grub" /etc/default/grub
     mkdir -p /usr/share/grub/themes
     cp -r "$DOTFILES/sys/grub/tokyo-night" /usr/share/grub/themes/
+    sed -i "s|^GRUB_TOP_LEVEL=.*|GRUB_TOP_LEVEL='/boot/vmlinuz-$KERNEL_PACKAGE'|" /etc/default/grub
     sed -i 's/#GRUB_DISABLE_OS_PROBER=false/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
     sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"root=UUID=$ROOT_UUID rootflags=subvol=@ rw\"|" /etc/default/grub
     grub-mkconfig -o /boot/grub/grub.cfg
@@ -305,13 +320,10 @@ if [ "$TEST_MODE" = false ]; then
 
     echo ":: Applying dotfiles with GNU Stow..."
     chown -R "$NEW_USER:$NEW_USER" "$DOTFILES"
-    for script in "$DOTFILES/scripts/bin/"*; do
-        [ -e "\$script" ] || continue
-        target="/usr/local/bin/$(basename "\$script")"
-        if [ -f "\$target" ] || [ -L "\$target" ]; then
-            rm -f "\$target"
-        fi
-    done
+    rm -f /usr/local/bin/awww.sh \
+        /usr/local/bin/qbarmain.sh \
+        /usr/local/bin/welcome.sh \
+        /usr/local/bin/wf-recorder-toggle.sh
     su - "$NEW_USER" -c "cd '$DOTFILES' && stow cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh"
     cd "$DOTFILES"
     stow -t /usr/local scripts
