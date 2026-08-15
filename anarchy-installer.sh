@@ -337,7 +337,23 @@ if [ "$TEST_MODE" = false ]; then
     cp "$DOTFILES/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
     su - "$NEW_USER" -c "git clone https://github.com/Fred78290/nct6687d '$DOTFILES/nct6687d'"
     cd "$DOTFILES/nct6687d"
-    make dkms/install
+    TARGET_KERNEL_VERSION=""
+    for kernel_dir in /usr/lib/modules/*; do
+        if [ -d "\$kernel_dir/build" ]; then
+            TARGET_KERNEL_VERSION="\${kernel_dir##*/}"
+            break
+        fi
+    done
+    if [ -z "\$TARGET_KERNEL_VERSION" ]; then
+        echo "ERROR: Target kernel headers were not found."
+        exit 1
+    fi
+    rm -rf dkms
+    mkdir -p dkms
+    cp dkms.conf Makefile nct6687.c dkms/
+    rm -rf /usr/src/nct6687d-1
+    cp -rT dkms /usr/src/nct6687d-1
+    dkms install nct6687d/1 -k "\$TARGET_KERNEL_VERSION"
 
     echo ":: Setting Zsh and Oh My Zsh as the login shell..."
     chsh -s /bin/zsh "$NEW_USER"
