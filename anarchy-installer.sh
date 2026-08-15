@@ -339,7 +339,7 @@ if [ "$TEST_MODE" = false ]; then
     sudo stow -t /usr/local scripts
     ls -la /usr/local/bin/ | head -5
     echo " ✓ Scripts stowed"
-    sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
+    sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
 
     echo ":: Configuring Nautilus terminal integration..."
     if command -v gsettings >/dev/null 2>&1 && command -v dbus-run-session >/dev/null 2>&1 \
@@ -388,6 +388,11 @@ if [ "$TEST_MODE" = false ]; then
 
     echo "Enabling sddm..."    
     systemctl enable sddm
+
+    if systemctl list-unit-files coolercontrold.service >/dev/null 2>&1; then
+        echo "Enabling CoolerControl daemon..."
+        sudo systemctl enable --now coolercontrold.service || true
+    fi
 EOF
     umount -R /mnt
 fi
