@@ -141,7 +141,7 @@ case "$KERNEL_CHOICE" in
     "linux-hardened"*) KERNEL_PACKAGE="linux-hardened"; KERNEL_NAME="linux-hardened" ;;
     *) exit 1 ;;
 esac
-DOTFILES="/home/anarchydots"
+DOTFILES="/home/$NEW_USER/anarchydots"
 
 # 5. Summary
 clear
@@ -287,8 +287,8 @@ if [ "$TEST_MODE" = false ]; then
     echo "$NEW_USER:$NEW_PASS" | chpasswd
     sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
     
-    mkdir -p /home
-    git clone https://github.com/Riezz0/anarchydots.git "$DOTFILES"
+    git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
+    chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
     echo ":: Installing GRUB Tokyo Night theme..."
     rm -f /etc/default/grub
@@ -317,23 +317,29 @@ if [ "$TEST_MODE" = false ]; then
     mkdir -p /var/local/sddm-wallpaper
     cp -r "$DOTFILES/sys/sddm/initial-setup/." /var/local/sddm-wallpaper/
 
-    echo ":: Applying dotfiles with GNU Stow..."
-    chown -R "$NEW_USER:$NEW_USER" "$DOTFILES"
-    rm -rf \
-        "/home/$NEW_USER/.local" \
-        "/home/$NEW_USER/.config" \
-        "/home/$NEW_USER/.icons" \
-        "/home/$NEW_USER/.oh-my-zsh" \
-        "/home/$NEW_USER/.themes" \
-        "/home/$NEW_USER/symbols" \
-        "/home/$NEW_USER/.zshrc"
-    rm -f /usr/local/bin/awww.sh \
-        /usr/local/bin/qbarmain.sh \
-        /usr/local/bin/welcome.sh \
-        /usr/local/bin/wf-recorder-toggle.sh
-    su - "$NEW_USER" -c "cd '$DOTFILES' && stow cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh"
-    cd "$DOTFILES"
-    stow -t /usr/local scripts
+    echo ":: Stowing Dotfiles Packages..."
+    rm -rf "/home/$NEW_USER/.config"
+    rm -rf "/home/$NEW_USER/.icons"
+    rm -rf "/home/$NEW_USER/.themes"
+    if [ -d "/home/$NEW_USER/.local/share/themes" ]; then
+        cp -a "/home/$NEW_USER/.local/share/themes" /tmp/user_themes_backup
+    fi
+    rm -rf "/home/$NEW_USER/.local"
+    if [ -d /tmp/user_themes_backup ]; then
+        mkdir -p "/home/$NEW_USER/.local/share"
+        mv /tmp/user_themes_backup "/home/$NEW_USER/.local/share/themes"
+        chown -R "$NEW_USER:users" "/home/$NEW_USER/.local"
+    fi
+    rm -rf "/home/$NEW_USER/.oh-my-zsh"
+    rm -rf "/home/$NEW_USER/.cache"
+    rm -f "/home/$NEW_USER/.zshrc"
+    cd "/home/$NEW_USER/anarchydots"
+    rm -rf /usr/local/bin
+    sudo mkdir -p /usr/local/
+    sudo stow -t /usr/local scripts
+    ls -la /usr/local/bin/ | head -5
+    echo " ✓ Scripts stowed"
+    sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
 
     echo ":: Configuring Nautilus terminal integration..."
     if command -v gsettings >/dev/null 2>&1 && command -v dbus-run-session >/dev/null 2>&1 \
