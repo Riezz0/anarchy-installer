@@ -141,7 +141,7 @@ case "$KERNEL_CHOICE" in
     "linux-hardened"*) KERNEL_PACKAGE="linux-hardened"; KERNEL_NAME="linux-hardened" ;;
     *) exit 1 ;;
 esac
-DOTFILES="/home/$NEW_USER/git/anarchydots"
+DOTFILES="/home/anarchydots"
 
 # 5. Summary
 clear
@@ -287,8 +287,7 @@ if [ "$TEST_MODE" = false ]; then
     echo "$NEW_USER:$NEW_PASS" | chpasswd
     sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
     
-    mkdir -p "/home/$NEW_USER/git"
-    chown "$NEW_USER:$NEW_USER" "/home/$NEW_USER/git"
+    mkdir -p /home
     git clone https://github.com/Riezz0/anarchydots.git "$DOTFILES"
 
     echo ":: Installing GRUB Tokyo Night theme..."
@@ -320,6 +319,29 @@ if [ "$TEST_MODE" = false ]; then
 
     echo ":: Applying dotfiles with GNU Stow..."
     chown -R "$NEW_USER:$NEW_USER" "$DOTFILES"
+    rm -rf \
+        "/home/$NEW_USER/.local/share/icons" \
+        "/home/$NEW_USER/.config/fastfetch" \
+        "/home/$NEW_USER/.config/presets/user" \
+        "/home/$NEW_USER/.config/gtk-3.0" \
+        "/home/$NEW_USER/.config/gtk-4.0" \
+        "/home/$NEW_USER/.config/.hypr-themes" \
+        "/home/$NEW_USER/.config/hypr" \
+        "/home/$NEW_USER/.icons" \
+        "/home/$NEW_USER/.config/kitty" \
+        "/home/$NEW_USER/.config/Kvantum" \
+        "/home/$NEW_USER/.config/nvim" \
+        "/home/$NEW_USER/.oh-my-zsh" \
+        "/home/$NEW_USER/.config/pywal" \
+        "/home/$NEW_USER/.config/qt5ct" \
+        "/home/$NEW_USER/.config/qt6ct" \
+        "/home/$NEW_USER/.config/quickshell" \
+        "/home/$NEW_USER/.config/rofi" \
+        "/home/$NEW_USER/.themes" \
+        "/home/$NEW_USER/.config/wal" \
+        "/home/$NEW_USER/.config/xkb" \
+        "/home/$NEW_USER/symbols" \
+        "/home/$NEW_USER/.zshrc"
     rm -f /usr/local/bin/awww.sh \
         /usr/local/bin/qbarmain.sh \
         /usr/local/bin/welcome.sh \
