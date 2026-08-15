@@ -320,26 +320,11 @@ if [ "$TEST_MODE" = false ]; then
     echo ":: Applying dotfiles with GNU Stow..."
     chown -R "$NEW_USER:$NEW_USER" "$DOTFILES"
     rm -rf \
-        "/home/$NEW_USER/.local/share/icons" \
-        "/home/$NEW_USER/.config/fastfetch" \
-        "/home/$NEW_USER/.config/presets/user" \
-        "/home/$NEW_USER/.config/gtk-3.0" \
-        "/home/$NEW_USER/.config/gtk-4.0" \
-        "/home/$NEW_USER/.config/.hypr-themes" \
-        "/home/$NEW_USER/.config/hypr" \
+        "/home/$NEW_USER/.local" \
+        "/home/$NEW_USER/.config" \
         "/home/$NEW_USER/.icons" \
-        "/home/$NEW_USER/.config/kitty" \
-        "/home/$NEW_USER/.config/Kvantum" \
-        "/home/$NEW_USER/.config/nvim" \
         "/home/$NEW_USER/.oh-my-zsh" \
-        "/home/$NEW_USER/.config/pywal" \
-        "/home/$NEW_USER/.config/qt5ct" \
-        "/home/$NEW_USER/.config/qt6ct" \
-        "/home/$NEW_USER/.config/quickshell" \
-        "/home/$NEW_USER/.config/rofi" \
         "/home/$NEW_USER/.themes" \
-        "/home/$NEW_USER/.config/wal" \
-        "/home/$NEW_USER/.config/xkb" \
         "/home/$NEW_USER/symbols" \
         "/home/$NEW_USER/.zshrc"
     rm -f /usr/local/bin/awww.sh \
@@ -349,6 +334,18 @@ if [ "$TEST_MODE" = false ]; then
     su - "$NEW_USER" -c "cd '$DOTFILES' && stow cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh"
     cd "$DOTFILES"
     stow -t /usr/local scripts
+
+    echo ":: Configuring Nautilus terminal integration..."
+    if command -v gsettings >/dev/null 2>&1 && command -v dbus-run-session >/dev/null 2>&1 \
+        && gsettings list-schemas | grep -qx 'com.github.stunkymonkey.nautilus-open-any-terminal'; then
+        su - "$NEW_USER" -c "nautilus -q" || true
+        su - "$NEW_USER" -c "dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal terminal kitty"
+        su - "$NEW_USER" -c "dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal keybindings '<Ctrl><Alt>t'"
+        su - "$NEW_USER" -c "dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal new-tab true"
+        su - "$NEW_USER" -c "dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal flatpak system"
+    else
+        echo "WARNING: Nautilus terminal integration is not installed; skipping GSettings setup."
+    fi
 
     echo ":: Installing fonts..."
     install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/fonts"
