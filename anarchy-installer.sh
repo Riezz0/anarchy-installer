@@ -305,6 +305,13 @@ if [ "$TEST_MODE" = false ]; then
 
     echo ":: Applying dotfiles with GNU Stow..."
     chown -R "$NEW_USER:$NEW_USER" "$DOTFILES"
+    for script in "$DOTFILES/scripts/bin/"*; do
+        [ -e "\$script" ] || continue
+        target="/home/$NEW_USER/bin/$(basename "\$script")"
+        if [ -f "\$target" ] || [ -L "\$target" ]; then
+            rm -f "\$target"
+        fi
+    done
     su - "$NEW_USER" -c "cd '$DOTFILES' && stow cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh"
     cd "$DOTFILES"
     stow -t /usr/local scripts
