@@ -318,6 +318,8 @@ if [ "$TEST_MODE" = false ]; then
     sudo chown "$NEW_USER:sddm" /var/local/sddm-wallpaper
     sudo chmod 775 /var/local/sddm-wallpaper
     cp -r "$DOTFILES/sys/sddm/initial-setup/." /var/local/sddm-wallpaper/
+    sudo chown -R "$NEW_USER:sddm" /var/local/sddm-wallpaper
+    sudo chmod -R u+rwX,g+rwX,o+rX /var/local/sddm-wallpaper
 
     echo ":: Stowing Dotfiles Packages..."
     rm -rf "/home/$NEW_USER/.config"
