@@ -1073,9 +1073,9 @@ class InstallPage(Adw.NavigationPage):
         cmd = [INSTALLER_SCRIPT, "--gui-env"] if os.geteuid() == 0 else ["sudo", INSTALLER_SCRIPT, "--gui-env"]
 
         self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                       stderr=subprocess.STDOUT, bufsize=0)
+                                       stderr=subprocess.STDOUT, bufsize=65536)
         os.set_blocking(self._proc.stdout.fileno(), False)
-        GLib.timeout_add(30, self._poll_output)
+        GLib.timeout_add(16, self._poll_output)
 
     _PHASE_MARKERS = {
         "Partitioning":          (0.05, "Partitioning drive..."),

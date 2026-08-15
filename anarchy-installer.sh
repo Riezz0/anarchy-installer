@@ -108,10 +108,36 @@ if [[ "${1:-}" == "--gui-env" ]]; then
         fi
     fi
 
-    set -e
-    echo "[GUI] Sourced config from $ENV_FILE"
-    echo "[GUI] Drive: $TARGET_DRIVE | Mode: $INSTALL_MODE | EFI: $IS_EFI | User: $NEW_USER"
-    export GUI_MODE=1
+set -e
+
+# Error handler: restore boot files if installation fails
+cleanup_on_error() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "ERROR: Installation failed (exit code $exit_code)"
+        # Restore boot files if backup exists
+        if [ -d "$BOOT_BACKUP" ]; then
+            echo "Restoring boot files from backup..."
+            if [ "$IS_EFI" = true ]; then
+                mount "$EFI_PART" /tmp/.anarchy_efi_restore 2>/dev/null && {
+                    cp -a "$BOOT_BACKUP"/vmlinuz* /tmp/.anarchy_efi_restore/ 2>/dev/null || true
+                    cp -a "$BOOT_BACKUP"/initramfs* /tmp/.anarchy_efi_restore/ 2>/dev/null || true
+                    cp -a "$BOOT_BACKUP"/EFI /tmp/.anarchy_efi_restore/ 2>/dev/null || true
+                    umount /tmp/.anarchy_efi_restore 2>/dev/null || true
+                }
+                rmdir /tmp/.anarchy_efi_restore 2>/dev/null || true
+            fi
+            rm -rf "$BOOT_BACKUP"
+        fi
+        # Unmount if mounted
+        umount -R /mnt 2>/dev/null || true
+    fi
+}
+trap cleanup_on_error EXIT
+
+echo "[GUI] Sourced config from $ENV_FILE"
+echo "[GUI] Drive: $TARGET_DRIVE | Mode: $INSTALL_MODE | EFI: $IS_EFI | User: $NEW_USER"
+export GUI_MODE=1
 else
     # --- 1. Checks ---
     if [[ $EUID -ne 0 ]]; then
@@ -268,6 +294,31 @@ else
     echo
 
     set -e
+
+    # Error handler: restore boot files if installation fails
+    cleanup_on_error() {
+        local exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            echo "ERROR: Installation failed (exit code $exit_code)"
+            # Restore boot files if backup exists
+            if [ -d "$BOOT_BACKUP" ]; then
+                echo "Restoring boot files from backup..."
+                if [ "$IS_EFI" = true ]; then
+                    mount "$EFI_PART" /tmp/.anarchy_efi_restore 2>/dev/null && {
+                        cp -a "$BOOT_BACKUP"/vmlinuz* /tmp/.anarchy_efi_restore/ 2>/dev/null || true
+                        cp -a "$BOOT_BACKUP"/initramfs* /tmp/.anarchy_efi_restore/ 2>/dev/null || true
+                        cp -a "$BOOT_BACKUP"/EFI /tmp/.anarchy_efi_restore/ 2>/dev/null || true
+                        umount /tmp/.anarchy_efi_restore 2>/dev/null || true
+                    }
+                    rmdir /tmp/.anarchy_efi_restore 2>/dev/null || true
+                fi
+                rm -rf "$BOOT_BACKUP"
+            fi
+            # Unmount if mounted
+            umount -R /mnt 2>/dev/null || true
+        fi
+    }
+    trap cleanup_on_error EXIT
 fi
 # --- EXECUTION ---
 
@@ -314,7 +365,19 @@ mount -o noatime,compress=zstd,subvol=@log "$ROOT_PART" /mnt/var/log
 mount -o noatime,compress=zstd,subvol=@pkg "$ROOT_PART" /mnt/var/cache/pacman/pkg
 mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
 
-if [ "$IS_EFI" = true ]; then mount "$EFI_PART" /mnt/boot; fi
+if [ "$IS_EFI" = true ]; then
+    # Backup existing boot files before mounting (in case of shared EFI partition)
+    export BOOT_BACKUP="/tmp/.anarchy_boot_backup_$(date +%s)"
+    mkdir -p "$BOOT_BACKUP"
+    mount "$EFI_PART" /tmp/.anarchy_efi_backup 2>/dev/null && {
+        cp -a /tmp/.anarchy_efi_backup/vmlinuz* "$BOOT_BACKUP/" 2>/dev/null || true
+        cp -a /tmp/.anarchy_efi_backup/initramfs* "$BOOT_BACKUP/" 2>/dev/null || true
+        cp -a /tmp/.anarchy_efi_backup/EFI "$BOOT_BACKUP/" 2>/dev/null || true
+        umount /tmp/.anarchy_efi_backup 2>/dev/null || true
+    }
+    rmdir /tmp/.anarchy_efi_backup 2>/dev/null || true
+    mount "$EFI_PART" /mnt/boot
+fi
 ok "Subvolumes mounted"
 echo
 
@@ -497,77 +560,79 @@ systemctl enable NetworkManager
 systemctl enable sddm
 
 echo ":: Cloning Dotfiles..."
-git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
-chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
+if ! git clone --depth 1 https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"; then
+    echo "WARN: Dotfiles clone failed. Skipping dotfile setup."
+else
+    chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
-echo ":: Stowing Dotfiles Packages..."
-rm -rf "/home/$NEW_USER/.config"
-rm -rf "/home/$NEW_USER/.icons"
-rm -rf "/home/$NEW_USER/.themes"
-if [ -d "/home/$NEW_USER/.local/share/themes" ]; then
-    cp -a "/home/$NEW_USER/.local/share/themes" "/tmp/user_themes_backup"
-fi
-rm -rf "/home/$NEW_USER/.local"
-if [ -d "/tmp/user_themes_backup" ]; then
-    mkdir -p "/home/$NEW_USER/.local/share"
-    mv "/tmp/user_themes_backup" "/home/$NEW_USER/.local/share/themes"
-    chown -R "$NEW_USER:users" "/home/$NEW_USER/.local"
-fi
-rm -rf "/home/$NEW_USER/.oh-my-zsh"
-rm -rf "/home/$NEW_USER/.cache"
-rm -f "/home/$NEW_USER/.zshrc"
+    echo ":: Stowing Dotfiles Packages..."
+    rm -rf "/home/$NEW_USER/.config"
+    rm -rf "/home/$NEW_USER/.icons"
+    rm -rf "/home/$NEW_USER/.themes"
+    if [ -d "/home/$NEW_USER/.local/share/themes" ]; then
+        cp -a "/home/$NEW_USER/.local/share/themes" "/tmp/user_themes_backup"
+    fi
+    rm -rf "/home/$NEW_USER/.local"
+    if [ -d "/tmp/user_themes_backup" ]; then
+        mkdir -p "/home/$NEW_USER/.local/share"
+        mv "/tmp/user_themes_backup" "/home/$NEW_USER/.local/share/themes"
+        chown -R "$NEW_USER:users" "/home/$NEW_USER/.local"
+    fi
+    rm -rf "/home/$NEW_USER/.oh-my-zsh"
+    rm -rf "/home/$NEW_USER/.cache"
+    rm -f "/home/$NEW_USER/.zshrc"
 
-cd "/home/$NEW_USER/anarchydots"
-rm -rf /usr/local/bin
+    cd "/home/$NEW_USER/anarchydots"
+    rm -rf /usr/local/bin
 
-#1
-sudo mkdir -p /usr/local/
-#2
-sudo stow -t /usr/local scripts
-ls -la /usr/local/bin/ | head -5
-echo "  ✔ Scripts stowed"
-sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
-echo ":: Installing Fonts..."
-mkdir -p "/home/$NEW_USER/.local/share/fonts/"
-cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
-fc-cache -fv
+    #1
+    sudo mkdir -p /usr/local/
+    #2
+    sudo stow -t /usr/local scripts
+    ls -la /usr/local/bin/ | head -5
+    echo "  ✔ Scripts stowed"
+    sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pypr pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
+    echo ":: Installing Fonts..."
+    mkdir -p "/home/$NEW_USER/.local/share/fonts/"
+    cp -r "/home/$NEW_USER/anarchydots/fonts/." "/home/$NEW_USER/.local/share/fonts/"
+    fc-cache -fv
 
-echo ":: Configuring SDDM..."
-cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
-cp -r "/home/$NEW_USER/anarchydots/sys/sddm/anarchy-sddm/" "/usr/share/sddm/themes/"
+    echo ":: Configuring SDDM..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/sddm.conf" "/etc/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/sddm/anarchy-sddm/" "/usr/share/sddm/themes/"
 
-# One-time setup (run with sudo)
-mkdir -p /var/local/sddm-wallpaper
-cp -r /home/"$NEW_USER"/anarchydots/sys/sddm/initial-setup/* /var/local/sddm-wallpaper/
-chown -R "$NEW_USER:sddm" /var/local/sddm-wallpaper
-chmod -R 775 /var/local/sddm-wallpaper
+    # One-time setup (run with sudo)
+    mkdir -p /var/local/sddm-wallpaper
+    cp -r /home/"$NEW_USER"/anarchydots/sys/sddm/initial-setup/* /var/local/sddm-wallpaper/
+    chown -R "$NEW_USER:sddm" /var/local/sddm-wallpaper
+    chmod -R 775 /var/local/sddm-wallpaper
 
-echo ":: Configuring GRUB Theme..."
-cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
-cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"
+    echo ":: Configuring GRUB Theme..."
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/grub" "/etc/default/"
+    cp -r "/home/$NEW_USER/anarchydots/sys/grub/tokyo-night" "/usr/share/grub/themes/"
 
-echo ":: Enabling Additional Services..."
-grub-mkconfig -o /boot/grub/grub.cfg
-systemctl enable bluetooth 2>/dev/null || true
-systemctl enable coolercontrold.service 2>/dev/null || true
-sudo -u "$NEW_USER" arch-update --tray --enable
-chsh -s /bin/zsh "$NEW_USER"
-chsh -s /bin/zsh root
+    echo ":: Enabling Additional Services..."
+    grub-mkconfig -o /boot/grub/grub.cfg
+    systemctl enable bluetooth 2>/dev/null || true
+    systemctl enable coolercontrold.service 2>/dev/null || true
+    sudo -u "$NEW_USER" arch-update --tray --enable
+    chsh -s /bin/zsh "$NEW_USER"
+    chsh -s /bin/zsh root
 
-echo ":: Setting up first-boot monitor config..."
-AUTOSTART_DIR="/home/$NEW_USER/.config/autostart"
-LOCALBIN_DIR="/home/$NEW_USER/.local/bin"
-mkdir -p "$AUTOSTART_DIR"
-mkdir -p "$LOCALBIN_DIR"
+    echo ":: Setting up first-boot monitor config..."
+    AUTOSTART_DIR="/home/$NEW_USER/.config/autostart"
+    LOCALBIN_DIR="/home/$NEW_USER/.local/bin"
+    mkdir -p "$AUTOSTART_DIR"
+    mkdir -p "$LOCALBIN_DIR"
 
-cat > "$LOCALBIN_DIR/hyprmon-once.sh" <<'HYPREOF'
+    cat > "$LOCALBIN_DIR/hyprmon-once.sh" <<'HYPREOF'
 #!/bin/bash
 hyprmon
 rm -f "$HOME/.config/autostart/hyprmon-firstboot.desktop"
 HYPREOF
-chmod +x "$LOCALBIN_DIR/hyprmon-once.sh"
+    chmod +x "$LOCALBIN_DIR/hyprmon-once.sh"
 
-cat > "$AUTOSTART_DIR/hyprmon-firstboot.desktop" <<DESKTOPEOF
+    cat > "$AUTOSTART_DIR/hyprmon-firstboot.desktop" <<DESKTOPEOF
 [Desktop Entry]
 Type=Application
 Name=Monitor Setup
@@ -578,8 +643,9 @@ NoDisplay=true
 X-GNOME-Autostart-enabled=true
 DESKTOPEOF
 
-chown -R "$NEW_USER:users" "$LOCALBIN_DIR"
-chown -R "$NEW_USER:users" "$AUTOSTART_DIR"
+    chown -R "$NEW_USER:users" "$LOCALBIN_DIR"
+    chown -R "$NEW_USER:users" "$AUTOSTART_DIR"
+fi
 
 rm -f /.install_env
 rm -f /.aur_helper_env
