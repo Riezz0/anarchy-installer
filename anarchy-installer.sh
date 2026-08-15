@@ -314,7 +314,9 @@ if [ "$TEST_MODE" = false ]; then
     rm -f /etc/sddm.conf
     cp -r "$DOTFILES/sys/sddm/anarchy-sddm" /usr/share/sddm/themes/
     cp "$DOTFILES/sys/sddm/sddm.conf" /etc/sddm.conf
-    mkdir -p /var/local/sddm-wallpaper
+    sudo mkdir -p /var/local/sddm-wallpaper
+    sudo chown "$NEW_USER:sddm" /var/local/sddm-wallpaper
+    sudo chmod 775 /var/local/sddm-wallpaper
     cp -r "$DOTFILES/sys/sddm/initial-setup/." /var/local/sddm-wallpaper/
 
     echo ":: Stowing Dotfiles Packages..."
