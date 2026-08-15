@@ -1,5 +1,5 @@
 pkgname=anarchy-installer
-pkgver=1.0.0
+pkgver=20260815.122129317146938
 pkgrel=1
 pkgdesc="Tokyo Night Gum-based Anarchy Arch Linux installer"
 arch=('any')
@@ -8,6 +8,10 @@ options=('!debug')
 depends=('bash' 'gum' 'figlet')
 source=('anarchy-installer.sh')
 sha256sums=('SKIP')
+
+pkgver() {
+    date -u +%Y%m%d.%H%M%S%N
+}
 
 package() {
     install -Dm755 "$srcdir/anarchy-installer.sh" \

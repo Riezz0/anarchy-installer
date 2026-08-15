@@ -307,7 +307,7 @@ if [ "$TEST_MODE" = false ]; then
     chown -R "$NEW_USER:$NEW_USER" "$DOTFILES"
     for script in "$DOTFILES/scripts/bin/"*; do
         [ -e "\$script" ] || continue
-        target="/home/$NEW_USER/bin/$(basename "\$script")"
+        target="/usr/local/bin/$(basename "\$script")"
         if [ -f "\$target" ] || [ -L "\$target" ]; then
             rm -f "\$target"
         fi
