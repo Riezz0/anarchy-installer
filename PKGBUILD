@@ -7,7 +7,7 @@ license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet')
 source=('anarchy-installer.sh' 'anarchy-launcher.sh')
-sha256sums=('SKIP')
+sha256sums=('SKIP' 'SKIP')
 
 pkgver() {
     date -u +%Y%m%d.%H%M%S%N
