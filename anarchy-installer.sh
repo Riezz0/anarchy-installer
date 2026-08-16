@@ -379,7 +379,7 @@ if [ "$TEST_MODE" = false ]; then
     fi
     rm -rf dkms
     mkdir -p dkms
-    cp dkms.conf Makefile nct6687.c dkms/
+    cp dkms.conf Kbuild Makefile nct6687.c dkms/
     rm -rf /usr/src/nct6687d-1
     cp -rT dkms /usr/src/nct6687d-1
     DKMS_LOG="/var/lib/dkms/nct6687d/1/build/make.log"
