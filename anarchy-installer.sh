@@ -141,6 +141,18 @@ case "$KERNEL_CHOICE" in
     "linux-hardened"*) KERNEL_PACKAGE="linux-hardened"; KERNEL_NAME="linux-hardened" ;;
     *) exit 1 ;;
 esac
+
+AUR_HELPER=$(gum choose \
+    --header "◆ Select AUR helper" --header.foreground "$BLUE" \
+    --cursor "➜ " --cursor.foreground "$PURPLE" \
+    "yay (recommended)" "paru" "pikaur")
+case "$AUR_HELPER" in
+    "yay"*) AUR_HELPER="yay" ;;
+    "paru"*) AUR_HELPER="paru" ;;
+    "pikaur"*) AUR_HELPER="pikaur" ;;
+    *) exit 1 ;;
+esac
+
 DOTFILES="/home/$NEW_USER/anarchydots"
 
 # 5. Summary
@@ -151,7 +163,7 @@ SUMMARY=$(printf '◆ User:      %s\n◆ Timezone:  %s\n◆ Hostname:  %s\n◆ D
     "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")
 SUMMARY=$(printf '%s\n◆ Audio:     %s\n◆ Microcode: %s\n◆ GPU:       %s' \
     "$SUMMARY" "$AUDIO_NAME" "$MICROCODE_NAME" "$GPU_NAME")
-SUMMARY=$(printf '%s\n◆ Kernel:    %s' "$SUMMARY" "$KERNEL_NAME")
+SUMMARY=$(printf '%s\n◆ Kernel:    %s\n◆ AUR:       %s' "$SUMMARY" "$KERNEL_NAME" "$AUR_HELPER")
 gum style --foreground "$FG" --border rounded --border-foreground "$PURPLE" --padding "1 2" \
     "$SUMMARY"
 gum confirm --affirmative "Wipe drive" --negative "Cancel" \
@@ -290,6 +302,15 @@ if [ "$TEST_MODE" = false ]; then
     git clone https://github.com/Riezz0/anarchydots "/home/$NEW_USER/anarchydots"
     chown -R "$NEW_USER:users" "/home/$NEW_USER/anarchydots"
 
+    echo ":: Installing AUR helper ($AUR_HELPER)..."
+    sudo -u "$NEW_USER" bash -c "
+        cd /tmp
+        git clone \"https://aur.archlinux.org/${AUR_HELPER}.git\"
+        cd ${AUR_HELPER}
+        makepkg -si --noconfirm
+    "
+    rm -rf "/tmp/$AUR_HELPER"
+
     echo ":: Installing GRUB Tokyo Night theme..."
     rm -f /etc/default/grub
     cp "$DOTFILES/sys/grub/grub" /etc/default/grub
@@ -320,6 +341,7 @@ if [ "$TEST_MODE" = false ]; then
     cp -r "$DOTFILES/sys/sddm/initial-setup/"* /var/local/sddm-wallpaper/
     sudo chown -R "$NEW_USER:sddm" /var/local/sddm-wallpaper
     sudo chmod -R u+rwX,g+rwX,o+rX /var/local/sddm-wallpaper
+    chown -R "$NEW_USER:$NEW_USER" /usr/share/icons/default
 
     echo ":: Stowing Dotfiles Packages..."
     rm -rf "/home/$NEW_USER/.config"
@@ -344,6 +366,7 @@ if [ "$TEST_MODE" = false ]; then
     ls -la /usr/local/bin/ | head -5
     echo " ✓ Scripts stowed"
     sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
+    sudo cp -r "/home/$NEW_USER/anarchydots/cursors/.local/share/icons/"* /usr/share/icons/
 
     echo ":: Configuring Nautilus terminal integration..."
     if command -v gsettings >/dev/null 2>&1 && command -v dbus-run-session >/dev/null 2>&1 \
