@@ -27,6 +27,7 @@ rm -f "$PACKAGE_DIR"/anarchy-installer-*.pkg.tar.*
 cd "$SCRIPT_DIR"
 rm -f ./*.pkg.tar.*
 makepkg --cleanbuild --clean --force
+rm -rf src
 
 published=0
 for package in ./*.pkg.tar.*; do
