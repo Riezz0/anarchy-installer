@@ -382,7 +382,7 @@ if [ "$TEST_MODE" = false ]; then
     cp dkms.conf Makefile nct6687.c dkms/
     rm -rf /usr/src/nct6687d-1
     cp -rT dkms /usr/src/nct6687d-1
-    DKMS_LOG="/var/lib/dkms/nct6687d/1/\$TARGET_KERNEL_VERSION/x86_64/log/make.log"
+    DKMS_LOG="/var/lib/dkms/nct6687d/1/build/make.log"
     if ! dkms install nct6687d/1 -k "\$TARGET_KERNEL_VERSION"; then
         echo "ERROR: NCT6687D failed to build for kernel \$TARGET_KERNEL_VERSION."
         if [ -f "\$DKMS_LOG" ]; then
