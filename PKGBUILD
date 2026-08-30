@@ -6,7 +6,7 @@ arch=('any')
 license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet' 'python' 'python-gobject' 'libadwaita')
-source=('anarchy-installer.sh' 'anarchy-launcher.sh' 'anarchy-welcome/anarchy-welcome.py')
+source=('anarchy-installer.sh' 'anarchy-launcher.sh')
 sha256sums=('SKIP' 'SKIP' 'SKIP')
 
 pkgver() {
@@ -18,6 +18,4 @@ package() {
         "$pkgdir/usr/local/bin/anarchy-installer"
     install -Dm755 "$srcdir/anarchy-launcher.sh" \
         "$pkgdir/usr/local/bin/anarchy-launcher"
-    install -Dm755 "$srcdir/anarchy-welcome/anarchy-welcome.py" \
-        "$pkgdir/usr/local/bin/anarchy-welcome"
 }
