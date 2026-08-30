@@ -363,6 +363,7 @@ if [ "$TEST_MODE" = false ]; then
     rm -rf /usr/local/bin
     sudo mkdir -p /usr/local/
     sudo stow -t /usr/local scripts
+    stow -t ~/Documents ilm
     ls -la /usr/local/bin/ | head -5
     echo " ✓ Scripts stowed"
     sudo -u "$NEW_USER" stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t "/home/$NEW_USER"
