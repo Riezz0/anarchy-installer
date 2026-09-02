@@ -306,7 +306,7 @@ PACCONF
     info "Installing anarchy-repo packages (offline from local repo)..."
     pacstrap -c --config "$TEMP_PACMAN_CONF" /mnt \
         adw-gtk-theme-git anarchy-installer anarchy-welcome arch-update awww \
-        blueman bluez bluez-utils coolercontrol coolercontrold eza \
+        blueman broadcom-wl-dkms bluez bluez-utils coolercontrol coolercontrold eza \
         goverlay-git gradience-git grim-git hypridle hyprlock hyprmon-bin \
         hyprpicker hyprscratch inter-font kitty kvantum-qt6-git mesa-utils \
         nautilus nautilus-admin-gtk4 nautilus-open-any-terminal-git neovim \
