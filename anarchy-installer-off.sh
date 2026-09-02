@@ -304,7 +304,7 @@ Include = /etc/pacman.d/mirrorlist
 PACCONF
 
     info "Installing anarchy-repo packages (offline from local repo)..."
-    pacstrap --config "$TEMP_PACMAN_CONF" /mnt \
+    pacstrap -C "$TEMP_PACMAN_CONF" /mnt \
         adw-gtk-theme anarchy-installer anarchy-welcome arch-update awww \
         blueman bluez bluez-utils chromium coolercontrol coolercontrold eza \
         goverlay-git gradience-git grim-git gtk2 hypridle hyprlock hyprmon-bin \
