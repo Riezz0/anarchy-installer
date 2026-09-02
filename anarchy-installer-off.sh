@@ -288,9 +288,18 @@ LocalFileSigLevel = Optional
 Architecture = auto
 CacheDir    = /var/cache/pacman/pkg/
 
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
 [anarchy-repo]
 SigLevel = Optional TrustAll
 Server = file://${LOCAL_REPO}
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
 PACCONF
 
     info "Installing anarchy-repo packages (offline from local repo)..."
@@ -306,7 +315,7 @@ PACCONF
         python-yapsy-git qt5-graphicaleffects qt5-imageformats qt5-multimedia \
         qt5-quickcontrols qt5-quickcontrols2 qt5-styleplugins qt5-svg \
         qt6 qt6-base qt6-declarative qt6-imageformats qt6-multimedia \
-        qt6-svg rofi slurp-git swaync ttf-font-awesome \
+        qt6-svg rofi slurp-git swaync         ttf-font-awesome-4 ttf-font-awesome-5 \
         ttf-jetbrains-mono-nerd vesktop-bin vkbasalt vlc \
         vlc-plugins-all wf-recorder-git wlsunset xdg-terminal-exec xfce-polkit \
         zsh-autocomplete zsh-autosuggestions zsh-autoswitch-virtualenv-git \
