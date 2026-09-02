@@ -153,6 +153,12 @@ case "$AUR_HELPER" in
     *) exit 1 ;;
 esac
 
+INSTALL_CHAOTIC_AUR=false
+if gum confirm --affirmative "Yes" --negative "No" \
+    --prompt.foreground "$YELLOW" "◆ Install Chaotic AUR repository?"; then
+    INSTALL_CHAOTIC_AUR=true
+fi
+
 DOTFILES="/home/$NEW_USER/anarchydots"
 
 # 5. Summary
@@ -163,7 +169,7 @@ SUMMARY=$(printf '◆ User:      %s\n◆ Timezone:  %s\n◆ Hostname:  %s\n◆ D
     "$([ "$IS_EFI" = true ] && echo "UEFI" || echo "BIOS")")
 SUMMARY=$(printf '%s\n◆ Audio:     %s\n◆ Microcode: %s\n◆ GPU:       %s' \
     "$SUMMARY" "$AUDIO_NAME" "$MICROCODE_NAME" "$GPU_NAME")
-SUMMARY=$(printf '%s\n◆ Kernel:    %s\n◆ AUR:       %s' "$SUMMARY" "$KERNEL_NAME" "$AUR_HELPER")
+SUMMARY=$(printf '%s\n◆ Kernel:    %s\n◆ AUR:       %s\n◆ Chaotic:   %s' "$SUMMARY" "$KERNEL_NAME" "$AUR_HELPER" "$([ "$INSTALL_CHAOTIC_AUR" = true ] && echo "Yes" || echo "No")")
 gum style --foreground "$FG" --border rounded --border-foreground "$PURPLE" --padding "1 2" \
     "$SUMMARY"
 gum confirm --affirmative "Wipe drive" --negative "Cancel" \
@@ -310,6 +316,16 @@ if [ "$TEST_MODE" = false ]; then
         makepkg -si --noconfirm
     "
     rm -rf "/tmp/$AUR_HELPER"
+
+    if [ "$INSTALL_CHAOTIC_AUR" = true ]; then
+        echo ":: Installing Chaotic AUR repository..."
+        pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
+        pacman-key --lsign-key 3056513887B78AEB
+        pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst'
+        pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'
+        printf '\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist\n' >> /etc/pacman.conf
+        pacman -Sy --noconfirm
+    fi
 
     echo ":: Installing GRUB Tokyo Night theme..."
     rm -f /etc/default/grub

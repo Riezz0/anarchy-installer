@@ -1,5 +1,5 @@
 pkgname=anarchy-installer
-pkgver=20260816.065101203935289
+pkgver=20260830.044323320525831
 pkgrel=1
 pkgdesc="Tokyo Night Gum-based Anarchy Arch Linux installer"
 arch=('any')
@@ -7,7 +7,7 @@ license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet' 'python' 'python-gobject' 'libadwaita')
 source=('anarchy-installer.sh' 'anarchy-launcher.sh')
-sha256sums=('SKIP' 'SKIP' 'SKIP')
+sha256sums=('SKIP' 'SKIP')
 
 pkgver() {
     date -u +%Y%m%d.%H%M%S%N
