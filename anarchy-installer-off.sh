@@ -305,19 +305,19 @@ PACCONF
 
     info "Installing anarchy-repo packages (offline from local repo)..."
     pacstrap -c --config "$TEMP_PACMAN_CONF" /mnt \
-        adw-gtk-theme-git anarchy-installer anarchy-welcome arch-update awww \
-        blueman broadcom-wl-dkms bluez bluez-utils coolercontrol coolercontrold eza \
-        goverlay-git gradience-git grim-git hypridle hyprlock hyprmon-bin \
+        adw-gtk-theme anarchy-installer anarchy-welcome arch-update awww \
+        blueman bluez bluez-utils chromium coolercontrol coolercontrold eza \
+        goverlay-git gradience-git grim-git gtk2 hypridle hyprlock hyprmon-bin \
         hyprpicker hyprscratch inter-font kitty kvantum-qt6-git mesa-utils \
         nautilus nautilus-admin-gtk4 nautilus-open-any-terminal-git neovim \
-        nwg-displays nwg-look oh-my-zsh-git otf-font-awesome-5 plymouth \
-        pyprland python-anyascii python-cssutils python-gobject python-libsass \
+        nwg-displays nwg-look oh-my-zsh-git otf-font-awesome plymouth \
+        python-anyascii python-cssutils python-encutils python-gobject python-libsass \
         python-material-color-utilities python-pywal16 python-pywalfox \
         python-yapsy-git qt5-graphicaleffects qt5-imageformats qt5-multimedia \
         qt5-quickcontrols qt5-quickcontrols2 qt5-styleplugins qt5-svg \
-        qt6-5compat qt6-base qt6-declarative qt6-imageformats qt6-multimedia \
-        qt6-svg rofi slurp-git swaync ttf-font-awesome-4 ttf-font-awesome-5 \
-        ttf-jetbrains-mono-nerd vencord-bin vesktop-bin vkbasalt vlc \
+        qt6 qt6-base qt6-declarative qt6-imageformats qt6-multimedia \
+        qt6-svg rofi slurp-git swaync ttf-font-awesome \
+        ttf-jetbrains-mono-nerd vesktop-bin vkbasalt vlc \
         vlc-plugins-all wf-recorder-git wlsunset xdg-terminal-exec xfce-polkit \
         zsh-autocomplete zsh-autosuggestions zsh-autoswitch-virtualenv-git \
         zsh-fast-syntax-highlighting zsh-syntax-highlighting
