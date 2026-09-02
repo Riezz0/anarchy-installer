@@ -285,22 +285,12 @@ if [ "$TEST_MODE" = false ]; then
 [options]
 SigLevel    = Required DatabaseOptional
 LocalFileSigLevel = Optional
-ParallelDownloads = 5
 Architecture = auto
 CacheDir    = /var/cache/pacman/pkg/
-
-[core]
-Include = /etc/pacman.d/mirrorlist
-
-[extra]
-Include = /etc/pacman.d/mirrorlist
 
 [anarchy-repo]
 SigLevel = Optional TrustAll
 Server = file://${LOCAL_REPO}
-
-[multilib]
-Include = /etc/pacman.d/mirrorlist
 PACCONF
 
     info "Installing anarchy-repo packages (offline from local repo)..."
@@ -352,19 +342,44 @@ if [ "$TEST_MODE" = false ]; then
     pacman-key --init
     pacman-key --populate archlinux
     
-    echo ":: Cleaning boot config..."
-    pacman -Rns --noconfirm archiso || true
+    echo ":: Cleaning up live ISO artifacts..."
+    pacman -Rns --noconfirm archiso mkinitcpio-archiso archiso-scripts 2>/dev/null || true
     rm -rf /etc/mkinitcpio.conf.d
-    rm -f /etc/mkinitcpio.d/*.preset
     rm -f /boot/vmlinuz* /boot/initramfs*
     
-    echo "MODULES=(btrfs)" > /etc/mkinitcpio.conf
-    echo "BINARIES=()" >> /etc/mkinitcpio.conf
-    echo "FILES=()" >> /etc/mkinitcpio.conf
-    echo "HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)" >> /etc/mkinitcpio.conf
+    echo ":: Configuring mkinitcpio..."
+    cat > /etc/mkinitcpio.conf <<MKINIT
+MODULES=(btrfs)
+BINARIES=()
+FILES=()
+HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
+MKINIT
+    
+    echo ":: Configuring pacman repositories..."
+    cat > /etc/pacman.conf <<PACMANCONF
+[options]
+SigLevel    = Required DatabaseOptional
+LocalFileSigLevel = Optional
+ParallelDownloads = 5
+Architecture = auto
+
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
+[anarchy-repo]
+SigLevel = Optional TrustAll
+Server = https://riezz0.github.io/\$repo/\$arch
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+PACMANCONF
+    pacman -Sy --noconfirm
     
     echo ":: Removing Live User and Autologin configs..."
-    userdel -f -r liveuser || true
+    userdel -f -r liveuser 2>/dev/null || true
     rm -rf /etc/sddm.conf.d/*
     if [ -f /etc/sddm.conf ]; then
         sed -i '/Autologin/d' /etc/sddm.conf
@@ -374,6 +389,7 @@ if [ "$TEST_MODE" = false ]; then
     rm -f /etc/sudoers.d/g_wheel
     rm -f /etc/sudoers.d/01_archiso
     
+    echo ":: Generating initramfs..."
     mkinitcpio -P
 
     echo ":: Installing Grub..."
