@@ -1,12 +1,12 @@
 pkgname=anarchy-installer
-pkgver=20260902.135605648609451
+pkgver=20260902.141508551744427
 pkgrel=1
 pkgdesc="Tokyo Night Gum-based Anarchy Arch Linux installer"
 arch=('any')
 license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet' 'python' 'python-gobject' 'libadwaita')
-source=('anarchy-installer.sh' 'anarchy-installer-off.sh' 'anarchy-launcher.sh')
+source=('anarchy-installer.sh' 'anarchy-launcher.sh' 'Anarchy-Installer')
 sha256sums=('SKIP' 'SKIP' 'SKIP')
 
 pkgver() {
@@ -16,8 +16,8 @@ pkgver() {
 package() {
     install -Dm755 "$srcdir/anarchy-installer.sh" \
         "$pkgdir/usr/local/bin/anarchy-installer"
-    install -Dm755 "$srcdir/anarchy-installer-off.sh" \
-        "$pkgdir/usr/local/bin/anarchy-installer-off"
     install -Dm755 "$srcdir/anarchy-launcher.sh" \
         "$pkgdir/usr/local/bin/anarchy-launcher"
+    install -Dm755 "$srcdir/Anarchy-Installer" \
+        "$pkgdir/usr/local/bin/Anarchy-Installer"
 }

@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Anarchy Arch installer. Run from the Arch ISO as root.
+if (( EUID != 0 )); then
+    printf 'Run this installer as root.\n' >&2
+    exit 1
+fi
+for command in gum figlet lsblk sgdisk pacstrap arch-chroot; do
+    command -v "$command" >/dev/null || { printf 'Missing command: %s\n' "$command" >&2; exit 1; }
+done
+
+BG='#1a1b26'; FG='#c0caf5'; BLUE='#7aa2f7'; CYAN='#7dcfff'
+GREEN='#9ece6a'; YELLOW='#e0af68'; RED='#f7768e'; PURPLE='#bb9af7'
+info() { gum style --foreground "$CYAN" "  ◆ $*"; }
+step() { gum style --foreground "$BLUE" --bold "  ➜ $*"; }
+ok() { gum style --foreground "$GREEN" "  ✓ $*"; }
+fail() { gum style --foreground "$RED" --bold "  ✖ $*"; }
+banner() { gum style --foreground "$PURPLE" --border double --border-foreground "$BLUE" --padding '0 2' --bold "$1"; }
+
+# Always detach every mount created by this script when it exits or is interrupted.
+SQUASHFS_MOUNT=''; SQUASHFS_LOOP=''
+cleanup() {
+    set +e
+    [[ -n "$SQUASHFS_MOUNT" ]] && umount -R "$SQUASHFS_MOUNT" &>/dev/null
+    [[ -n "$SQUASHFS_LOOP" ]] && losetup -d "$SQUASHFS_LOOP" &>/dev/null
+    umount -R /mnt &>/dev/null
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+cleanup
+
+banner "Anarchy Arch Linux"
+if ! ping -c 1 8.8.8.8 &>/dev/null; then fail 'Internet access is required.'; exit 1; fi
+
+IS_EFI=false; [[ -d /sys/firmware/efi ]] && IS_EFI=true
+TARGET_DRIVE=$(lsblk -dpno NAME,SIZE | gum choose --header 'Select target drive' --cursor '➜ ')
+[[ -n "$TARGET_DRIVE" ]] || exit 1
+TARGET_DRIVE=${TARGET_DRIVE%% *}
+PART_PREFIX=''; [[ "$TARGET_DRIVE" =~ [0-9]$ ]] && PART_PREFIX='p'
+EFI_PART="${TARGET_DRIVE}${PART_PREFIX}1"; ROOT_PART="${TARGET_DRIVE}${PART_PREFIX}2"
+
+ROOT_PASS=$(gum input --password --prompt 'Root password: '); [[ -n "$ROOT_PASS" ]] || exit 1
+NEW_USER=$(gum input --prompt 'Username: '); [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { fail 'Invalid username.'; exit 1; }
+NEW_PASS=$(gum input --password --prompt 'User password: '); [[ -n "$NEW_PASS" ]] || exit 1
+TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder 'Select timezone'); TIMEZONE=${TIMEZONE:-UTC}
+NEW_HOSTNAME=$(gum input --prompt 'Hostname: '); [[ -n "$NEW_HOSTNAME" ]] || exit 1
+
+MICROCODE=$(gum choose --header 'CPU microcode' 'Intel (intel-ucode)' 'AMD (amd-ucode)')
+case "$MICROCODE" in Intel*) MICROCODE_PACKAGE=intel-ucode;; AMD*) MICROCODE_PACKAGE=amd-ucode;; *) exit 1;; esac
+GPU=$(gum choose --header 'GPU driver' 'NVIDIA (nvidia)' 'AMD (Mesa/Vulkan)' 'Intel (Mesa/Vulkan)')
+case "$GPU" in
+    NVIDIA*) GPU_PACKAGES=(nvidia nvidia-utils lib32-nvidia-utils);;
+    AMD*) GPU_PACKAGES=(mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon);;
+    Intel*) GPU_PACKAGES=(mesa lib32-mesa vulkan-intel lib32-vulkan-intel);;
+    *) exit 1;;
+esac
+AUR_HELPER=$(gum choose --header 'AUR helper' 'yay' 'paru' 'pikaur')
+[[ "$AUR_HELPER" =~ ^(yay|paru|pikaur)$ ]] || exit 1
+EFI_PACKAGES=(); "$IS_EFI" && EFI_PACKAGES=(efibootmgr)
+DOTFILES="/home/$NEW_USER/anarchydots"
+
+banner Summary
+gum style --foreground "$FG" --border rounded --padding '1 2' \
+    "User: $NEW_USER  Timezone: $TIMEZONE  Hostname: $NEW_HOSTNAME\nDrive: $TARGET_DRIVE  GPU: $GPU  Microcode: $MICROCODE\nKernel: linux-zen  Audio: PipeWire  AUR: $AUR_HELPER"
+gum confirm --affirmative 'Wipe drive' --negative 'Cancel' "Wipe $TARGET_DRIVE?" || exit 1
+
+step 'Partitioning and formatting'
+sgdisk -Z "$TARGET_DRIVE"
+if "$IS_EFI"; then sgdisk -n 1:0:+512M -t 1:ef00 "$TARGET_DRIVE"; else sgdisk -n 1:0:+1M -t 1:ef02 "$TARGET_DRIVE"; fi
+sgdisk -n 2:0:0 -t 2:8300 "$TARGET_DRIVE"; partprobe "$TARGET_DRIVE"; sleep 2
+"$IS_EFI" && mkfs.vfat -F 32 "$EFI_PART"
+mkfs.btrfs -L ARCH_ROOT -f "$ROOT_PART"
+
+step 'Creating Btrfs subvolumes'
+mount "$ROOT_PART" /mnt
+for subvolume in @ @home @log @pkg @.snapshots; do btrfs subvolume create "/mnt/$subvolume"; done
+umount /mnt
+mount -o noatime,compress=zstd,subvol=@ "$ROOT_PART" /mnt
+mkdir -p /mnt/{home,var/log,var/cache/pacman/pkg,.snapshots,boot}
+mount -o noatime,compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
+mount -o noatime,compress=zstd,subvol=@log "$ROOT_PART" /mnt/var/log
+mount -o noatime,compress=zstd,subvol=@pkg "$ROOT_PART" /mnt/var/cache/pacman/pkg
+mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
+"$IS_EFI" && mount "$EFI_PART" /mnt/boot
+
+step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
+pacstrap /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
+    networkmanager hyprland uwsm pipewire pipewire-audio pipewire-alsa pipewire-pulse \
+    wireplumber git stow zsh dkms base-devel sudo rsync curl "$MICROCODE_PACKAGE" \
+    "${GPU_PACKAGES[@]}" "${EFI_PACKAGES[@]}"
+
+step 'Installing offline packages from anarchy-repo'
+SQUASHFS=''
+for path in /run/archiso/bootmnt/arch/x86_64/airootfs.sfs /run/archiso/bootmnt/arch/x86_64/rootfs.sfs /mnt/iso/arch/x86_64/airootfs.sfs; do
+    [[ -f "$path" ]] && SQUASHFS="$path" && break
+done
+[[ -n "$SQUASHFS" ]] || SQUASHFS=$(gum input --prompt 'Path to airootfs.sfs: ')
+[[ -f "$SQUASHFS" ]] || { fail "SquashFS not found: $SQUASHFS"; exit 1; }
+SQUASHFS_MOUNT=/tmp/anarchy-installer-squashfs; mkdir -p "$SQUASHFS_MOUNT"
+SQUASHFS_LOOP=$(losetup --find --show "$SQUASHFS"); mount -t squashfs -o ro "$SQUASHFS_LOOP" "$SQUASHFS_MOUNT"
+LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
+[[ -d "$LOCAL_REPO" ]] || { fail "Missing $LOCAL_REPO in the ISO."; exit 1; }
+mapfile -t OFFLINE_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.zst' -print)
+(( ${#OFFLINE_PACKAGES[@]} > 0 )) || { fail 'No offline package archives found.'; exit 1; }
+cp "${OFFLINE_PACKAGES[@]}" /mnt/var/cache/pacman/pkg/
+arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"'
+
+step 'Configuring the installed system'
+genfstab -U /mnt >> /mnt/etc/fstab
+cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
+ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
+arch-chroot /mnt /bin/bash <<EOF
+set -Eeuo pipefail
+pacman-key --init
+pacman-key --populate archlinux
+rm -rf /etc/mkinitcpio.conf.d /etc/sddm.conf.d/*
+userdel -f -r liveuser 2>/dev/null || true
+cat > /etc/mkinitcpio.conf <<'MKINIT'
+MODULES=(btrfs)
+BINARIES=()
+FILES=()
+HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
+MKINIT
+printf '\n[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = https://riezz0.github.io/\$repo/\$arch\n' >> /etc/pacman.conf
+mkinitcpio -P
+if $IS_EFI; then grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck; else grub-install --target=i386-pc '$TARGET_DRIVE' --recheck; fi
+useradd -m -G wheel -s /bin/bash '$NEW_USER'
+echo '$NEW_USER:$NEW_PASS' | chpasswd
+echo 'root:$ROOT_PASS' | chpasswd
+sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+echo '$NEW_HOSTNAME' > /etc/hostname
+ln -sf '/usr/share/zoneinfo/$TIMEZONE' /etc/localtime; hwclock --systohc
+git clone https://github.com/Riezz0/anarchydots '$DOTFILES'
+chown -R '$NEW_USER:users' '$DOTFILES'
+sudo -u '$NEW_USER' bash -c 'cd /tmp && git clone https://aur.archlinux.org/$AUR_HELPER.git && cd $AUR_HELPER && makepkg -si --noconfirm'
+rm -rf /tmp/$AUR_HELPER
+
+mkdir -p /usr/share/grub/themes
+cp '$DOTFILES/sys/grub/grub' /etc/default/grub
+cp -r '$DOTFILES/sys/grub/tokyo-night' /usr/share/grub/themes/
+sed -i "s|^GRUB_TOP_LEVEL=.*|GRUB_TOP_LEVEL='/boot/vmlinuz-linux-zen'|; s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"root=UUID=$ROOT_UUID rootflags=subvol=@ rw\"|" /etc/default/grub
+grub-mkconfig -o /boot/grub/grub.cfg
+
+mkdir -p /usr/share/sddm/themes
+cp -r '$DOTFILES/sys/sddm/anarchy-sddm' /usr/share/sddm/themes/
+cp '$DOTFILES/sys/sddm/sddm.conf' /etc/sddm.conf
+mkdir -p /var/local/sddm-wallpaper; cp -r '$DOTFILES/sys/sddm/initial-setup/.' /var/local/sddm-wallpaper/
+chown -R '$NEW_USER:sddm' /var/local/sddm-wallpaper; chmod -R u+rwX,g+rwX,o+rX /var/local/sddm-wallpaper
+
+if command -v gsettings >/dev/null && command -v dbus-run-session >/dev/null && gsettings list-schemas | grep -qx com.github.stunkymonkey.nautilus-open-any-terminal; then
+    su - '$NEW_USER' -c 'dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal terminal kitty'
+    su - '$NEW_USER' -c 'dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal keybindings "<Ctrl><Alt>t"'
+    su - '$NEW_USER' -c 'dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal new-tab true'
+fi
+
+rm -rf '$DOTFILES/nct6687d' '$DOTFILES/.config' '$DOTFILES/.local' '$DOTFILES/.cache' '$DOTFILES/.oh-my-zsh'
+cd '$DOTFILES'; stow -t /usr/local scripts; sudo -u '$NEW_USER' stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t '/home/$NEW_USER'
+install -d -o '$NEW_USER' -g '$NEW_USER' '/home/$NEW_USER/.local/share/fonts'; cp -r '$DOTFILES/fonts/.' '/home/$NEW_USER/.local/share/fonts/'
+cp '$DOTFILES/sys/no_nct6683.conf' /etc/modprobe.d/no_nct6683.conf; cp '$DOTFILES/sys/nct6687.conf' /etc/modules-load.d/nct6687.conf
+sudo -u '$NEW_USER' git clone https://github.com/Fred78290/nct6687d '$DOTFILES/nct6687d'; cd '$DOTFILES/nct6687d'
+rm -rf /usr/src/nct6687d-1; mkdir -p /usr/src/nct6687d-1; cp dkms.conf Kbuild Makefile nct6687.c /usr/src/nct6687d-1/
+dkms add -m nct6687d -v 1; dkms install nct6687d/1 -k "\$(ls /usr/lib/modules | head -1)"
+chsh -s /bin/zsh '$NEW_USER'; systemctl enable NetworkManager sddm
+EOF
+ok 'Installation complete. Reboot when ready.'
