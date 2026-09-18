@@ -58,11 +58,14 @@ esac
 AUR_HELPER=$(gum choose --header 'AUR helper' 'yay' 'paru' 'pikaur')
 [[ "$AUR_HELPER" =~ ^(yay|paru|pikaur)$ ]] || exit 1
 EFI_PACKAGES=(); "$IS_EFI" && EFI_PACKAGES=(efibootmgr)
+EXTRA_PACKAGES=()
+gum confirm --affirmative 'Install' --negative 'Skip' 'Install Chromium?' && EXTRA_PACKAGES+=(chromium)
+gum confirm --affirmative 'Install' --negative 'Skip' 'Install Visual Studio Code?' && EXTRA_PACKAGES+=(code)
 DOTFILES="/home/$NEW_USER/anarchydots"
 
 banner Summary
 gum style --foreground "$FG" --border rounded --padding '1 2' \
-    "User: $NEW_USER  Timezone: $TIMEZONE  Hostname: $NEW_HOSTNAME\nDrive: $TARGET_DRIVE  GPU: $GPU  Microcode: $MICROCODE\nKernel: linux-zen  Audio: PipeWire  AUR: $AUR_HELPER"
+    "User: $NEW_USER  Timezone: $TIMEZONE  Hostname: $NEW_HOSTNAME\nDrive: $TARGET_DRIVE  GPU: $GPU  Microcode: $MICROCODE\nKernel: linux-zen  Audio: PipeWire  AUR: $AUR_HELPER\nExtras: ${EXTRA_PACKAGES[*]:-none}"
 gum confirm --affirmative 'Wipe drive' --negative 'Cancel' "Wipe $TARGET_DRIVE?" || exit 1
 
 step 'Partitioning and formatting'
@@ -88,7 +91,7 @@ step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
 pacstrap /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
     networkmanager hyprland uwsm pipewire pipewire-audio pipewire-alsa pipewire-pulse \
     wireplumber git stow zsh dkms base-devel sudo rsync curl "$MICROCODE_PACKAGE" \
-    "${GPU_PACKAGES[@]}" "${EFI_PACKAGES[@]}"
+    "${GPU_PACKAGES[@]}" "${EFI_PACKAGES[@]}" "${EXTRA_PACKAGES[@]}"
 
 step 'Installing offline packages from anarchy-repo'
 SQUASHFS=''
