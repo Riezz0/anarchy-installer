@@ -116,8 +116,12 @@ LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
 mapfile -t OFFLINE_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.zst' -print)
 (( ${#OFFLINE_PACKAGES[@]} > 0 )) || { fail 'No offline package archives found.'; exit 1; }
 cp "${OFFLINE_PACKAGES[@]}" /mnt/var/cache/pacman/pkg/
-if ! arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"'; then
+OFFLINE_LOG=/mnt/var/log/anarchy-offline-pacman.log
+if ! arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"' 2>&1 | tee "$OFFLINE_LOG"; then
     fail 'Failed to install offline repository packages.'
+    echo '--- Last offline pacman diagnostics ---' >&2
+    tail -n 40 "$OFFLINE_LOG" >&2
+    echo '--- End offline pacman diagnostics ---' >&2
     exit 1
 fi
 
