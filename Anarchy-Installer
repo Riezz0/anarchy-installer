@@ -57,6 +57,8 @@ case "$GPU" in
 esac
 AUR_HELPER=$(gum choose --header 'AUR helper' 'yay' 'paru' 'pikaur')
 [[ "$AUR_HELPER" =~ ^(yay|paru|pikaur)$ ]] || exit 1
+INSTALL_CHAOTIC_AUR=false
+gum confirm --affirmative 'Install' --negative 'Skip' 'Enable Chaotic-AUR?' && INSTALL_CHAOTIC_AUR=true
 EFI_PACKAGES=(); "$IS_EFI" && EFI_PACKAGES=(efibootmgr)
 EXTRA_PACKAGES=()
 gum confirm --affirmative 'Install' --negative 'Skip' 'Install Chromium?' && EXTRA_PACKAGES+=(chromium)
@@ -64,8 +66,11 @@ gum confirm --affirmative 'Install' --negative 'Skip' 'Install Visual Studio Cod
 DOTFILES="/home/$NEW_USER/anarchydots"
 
 banner Summary
+SUMMARY=$(printf 'User: %s\nTimezone: %s\nHostname: %s\nDrive: %s\nGPU: %s\nMicrocode: %s\nKernel: linux-zen\nAudio: PipeWire\nAUR: %s\nChaotic-AUR: %s\nExtras: %s' \
+    "$NEW_USER" "$TIMEZONE" "$NEW_HOSTNAME" "$TARGET_DRIVE" "$GPU" \
+    "$MICROCODE" "$AUR_HELPER" "$INSTALL_CHAOTIC_AUR" "${EXTRA_PACKAGES[*]:-none}")
 gum style --foreground "$FG" --border rounded --padding '1 2' \
-    "User: $NEW_USER  Timezone: $TIMEZONE  Hostname: $NEW_HOSTNAME\nDrive: $TARGET_DRIVE  GPU: $GPU  Microcode: $MICROCODE\nKernel: linux-zen  Audio: PipeWire  AUR: $AUR_HELPER\nExtras: ${EXTRA_PACKAGES[*]:-none}"
+    "$SUMMARY"
 gum confirm --affirmative 'Wipe drive' --negative 'Cancel' "Wipe $TARGET_DRIVE?" || exit 1
 
 step 'Partitioning and formatting'
@@ -147,6 +152,7 @@ if (( OFFLINE_STATUS != 0 )); then
     echo '--- End offline pacman diagnostics ---' >&2
     exit 1
 fi
+rm -rf /mnt/var/local/anarchy-repo
 
 step 'Configuring the installed system'
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -164,6 +170,10 @@ BINARIES=()
 FILES=()
 HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
 MKINIT
+sed -i '/^\[anarchy-repo\]/,/^$/d' /etc/pacman.conf
+if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
+    printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
+fi
 printf '\n[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = https://riezz0.github.io/\$repo/\$arch\n' >> /etc/pacman.conf
 mkinitcpio -P
 if $IS_EFI; then grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck; else grub-install --target=i386-pc '$TARGET_DRIVE' --recheck; fi
@@ -177,6 +187,16 @@ git clone https://github.com/Riezz0/anarchydots '$DOTFILES'
 chown -R '$NEW_USER:users' '$DOTFILES'
 sudo -u '$NEW_USER' bash -c 'cd /tmp && git clone https://aur.archlinux.org/$AUR_HELPER.git && cd $AUR_HELPER && makepkg -si --noconfirm'
 rm -rf /tmp/$AUR_HELPER
+if $INSTALL_CHAOTIC_AUR; then
+    pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
+    pacman-key --lsign-key 3056513887B78AEB
+    pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst'
+    pacman -U --noconfirm 'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst'
+    if ! grep -q '^\[chaotic-aur\]' /etc/pacman.conf; then
+        printf '\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist\n' >> /etc/pacman.conf
+    fi
+    pacman -Sy --noconfirm
+fi
 
 mkdir -p /usr/share/grub/themes
 cp '$DOTFILES/sys/grub/grub' /etc/default/grub

@@ -1,5 +1,5 @@
 pkgname=anarchy-installer
-pkgver=20260919.050432089190329
+pkgver=20260919.052135000568172
 pkgrel=1
 pkgdesc="Tokyo Night Gum-based Anarchy Arch Linux installer"
 arch=('any')
