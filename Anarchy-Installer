@@ -88,10 +88,19 @@ mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
 "$IS_EFI" && mount "$EFI_PART" /mnt/boot
 
 step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
-pacstrap /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
+PACMAN_CONF=$(mktemp)
+# The local repository path belongs to the live ISO host, not /mnt.
+sed '/^\[anarchy-repo\]/,/^$/d' /etc/pacman.conf > "$PACMAN_CONF"
+if ! pacstrap -C "$PACMAN_CONF" /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
     networkmanager hyprland uwsm pipewire pipewire-audio pipewire-alsa pipewire-pulse \
     wireplumber git stow zsh dkms base-devel sudo rsync curl "$MICROCODE_PACKAGE" \
-    "${GPU_PACKAGES[@]}" "${EFI_PACKAGES[@]}" "${EXTRA_PACKAGES[@]}"
+    "${GPU_PACKAGES[@]}" "${EFI_PACKAGES[@]}" "${EXTRA_PACKAGES[@]}"; then
+    rm -f "$PACMAN_CONF"
+    fail 'Failed to install the base system.'
+    exit 1
+fi
+rm -f "$PACMAN_CONF"
+[[ -x /mnt/bin/bash ]] || { fail 'Base system installation is incomplete.'; exit 1; }
 
 step 'Installing offline packages from anarchy-repo'
 SQUASHFS=''
@@ -107,13 +116,16 @@ LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
 mapfile -t OFFLINE_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.zst' -print)
 (( ${#OFFLINE_PACKAGES[@]} > 0 )) || { fail 'No offline package archives found.'; exit 1; }
 cp "${OFFLINE_PACKAGES[@]}" /mnt/var/cache/pacman/pkg/
-arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"'
+if ! arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"'; then
+    fail 'Failed to install offline repository packages.'
+    exit 1
+fi
 
 step 'Configuring the installed system'
 genfstab -U /mnt >> /mnt/etc/fstab
 cp --remove-destination /etc/resolv.conf /mnt/etc/resolv.conf
 ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
-arch-chroot /mnt /bin/bash <<EOF
+if ! arch-chroot /mnt /bin/bash <<EOF
 set -Eeuo pipefail
 pacman-key --init
 pacman-key --populate archlinux
@@ -166,4 +178,8 @@ rm -rf /usr/src/nct6687d-1; mkdir -p /usr/src/nct6687d-1; cp dkms.conf Kbuild Ma
 dkms add -m nct6687d -v 1; dkms install nct6687d/1 -k "\$(ls /usr/lib/modules | head -1)"
 chsh -s /bin/zsh '$NEW_USER'; systemctl enable NetworkManager sddm
 EOF
+then
+    fail 'Installed system configuration failed.'
+    exit 1
+fi
 ok 'Installation complete. Reboot when ready.'
