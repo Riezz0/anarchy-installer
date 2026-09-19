@@ -60,15 +60,12 @@ AUR_HELPER=$(gum choose --header 'AUR helper' 'yay' 'paru' 'pikaur')
 INSTALL_CHAOTIC_AUR=false
 gum confirm --affirmative 'Install' --negative 'Skip' 'Enable Chaotic-AUR?' && INSTALL_CHAOTIC_AUR=true
 EFI_PACKAGES=(); "$IS_EFI" && EFI_PACKAGES=(efibootmgr)
-EXTRA_PACKAGES=()
-gum confirm --affirmative 'Install' --negative 'Skip' 'Install Chromium?' && EXTRA_PACKAGES+=(chromium)
-gum confirm --affirmative 'Install' --negative 'Skip' 'Install Visual Studio Code?' && EXTRA_PACKAGES+=(code)
 DOTFILES="/home/$NEW_USER/anarchydots"
 
 banner Summary
-SUMMARY=$(printf 'User: %s\nTimezone: %s\nHostname: %s\nDrive: %s\nGPU: %s\nMicrocode: %s\nKernel: linux-zen\nAudio: PipeWire\nAUR: %s\nChaotic-AUR: %s\nExtras: %s' \
+SUMMARY=$(printf 'User: %s\nTimezone: %s\nHostname: %s\nDrive: %s\nGPU: %s\nMicrocode: %s\nKernel: linux-zen\nAudio: PipeWire\nAUR: %s\nChaotic-AUR: %s' \
     "$NEW_USER" "$TIMEZONE" "$NEW_HOSTNAME" "$TARGET_DRIVE" "$GPU" \
-    "$MICROCODE" "$AUR_HELPER" "$INSTALL_CHAOTIC_AUR" "${EXTRA_PACKAGES[*]:-none}")
+    "$MICROCODE" "$AUR_HELPER" "$INSTALL_CHAOTIC_AUR")
 gum style --foreground "$FG" --border rounded --padding '1 2' \
     "$SUMMARY"
 gum confirm --affirmative 'Wipe drive' --negative 'Cancel' "Wipe $TARGET_DRIVE?" || exit 1
@@ -101,7 +98,7 @@ sed '/^\[anarchy-repo\]/,/^$/d' /etc/pacman.conf > "$PACMAN_CONF"
 if ! pacstrap -C "$PACMAN_CONF" /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
     networkmanager hyprland uwsm pipewire pipewire-audio pipewire-alsa pipewire-pulse \
     wireplumber git stow zsh dkms base-devel sudo rsync curl "$MICROCODE_PACKAGE" \
-    "${GPU_PACKAGES[@]}" "${EFI_PACKAGES[@]}" "${EXTRA_PACKAGES[@]}"; then
+    "${GPU_PACKAGES[@]}" "${EFI_PACKAGES[@]}"; then
     rm -f "$PACMAN_CONF"
     fail 'Failed to install the base system.'
     exit 1
