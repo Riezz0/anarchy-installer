@@ -86,6 +86,8 @@ mount -o noatime,compress=zstd,subvol=@log "$ROOT_PART" /mnt/var/log
 mount -o noatime,compress=zstd,subvol=@pkg "$ROOT_PART" /mnt/var/cache/pacman/pkg
 mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
 "$IS_EFI" && mount "$EFI_PART" /mnt/boot
+# Never let a cached installer archive override the version embedded in this ISO.
+rm -f /mnt/var/cache/pacman/pkg/anarchy-installer-*.pkg.tar.*
 
 step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
 PACMAN_CONF=$(mktemp)
@@ -116,8 +118,14 @@ LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
 mapfile -t OFFLINE_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.zst' -print)
 (( ${#OFFLINE_PACKAGES[@]} > 0 )) || { fail 'No offline package archives found.'; exit 1; }
 cp "${OFFLINE_PACKAGES[@]}" /mnt/var/cache/pacman/pkg/
-OFFLINE_LOG=/mnt/var/log/anarchy-offline-pacman.log
-if ! arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"' 2>&1 | tee "$OFFLINE_LOG"; then
+OFFLINE_LOG=/tmp/anarchy-offline-pacman.log
+: > "$OFFLINE_LOG"
+set +e
+arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"' 2>&1 | tee "$OFFLINE_LOG"
+OFFLINE_STATUS=${PIPESTATUS[0]}
+set -e
+if (( OFFLINE_STATUS != 0 )); then
+    cp "$OFFLINE_LOG" /mnt/root/anarchy-offline-pacman.log 2>/dev/null || true
     fail 'Failed to install offline repository packages.'
     echo '--- Last offline pacman diagnostics ---' >&2
     tail -n 40 "$OFFLINE_LOG" >&2
