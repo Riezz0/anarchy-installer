@@ -117,11 +117,25 @@ LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
 [[ -d "$LOCAL_REPO" ]] || { fail "Missing $LOCAL_REPO in the ISO."; exit 1; }
 mapfile -t OFFLINE_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.zst' -print)
 (( ${#OFFLINE_PACKAGES[@]} > 0 )) || { fail 'No offline package archives found.'; exit 1; }
-cp "${OFFLINE_PACKAGES[@]}" /mnt/var/cache/pacman/pkg/
+info "Embedding local repository with ${#OFFLINE_PACKAGES[@]} archives"
+rm -rf /mnt/var/local/anarchy-repo
+mkdir -p /mnt/var/local
+cp -a "$LOCAL_REPO" /mnt/var/local/anarchy-repo
+{
+    printf '[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file:///var/local/anarchy-repo\n\n'
+    cat /mnt/etc/pacman.conf
+} > /mnt/etc/pacman.conf.anarchy
+mv /mnt/etc/pacman.conf.anarchy /mnt/etc/pacman.conf
 OFFLINE_LOG=/tmp/anarchy-offline-pacman.log
 : > "$OFFLINE_LOG"
 set +e
-arch-chroot /mnt bash -c 'shopt -s nullglob; packages=(/var/cache/pacman/pkg/*.pkg.tar.zst); pacman -U --noconfirm "${packages[@]}"' 2>&1 | tee "$OFFLINE_LOG"
+arch-chroot /mnt bash -c '
+    set -Eeuo pipefail
+    pacman -Sy --noconfirm
+    mapfile -t packages < <(pacman -Sl anarchy-repo | awk "{print \$2}")
+    printf "Installing %s repository packages\\n" "${#packages[@]}"
+    pacman -S --needed --noconfirm "${packages[@]}"
+' 2>&1 | tee "$OFFLINE_LOG"
 OFFLINE_STATUS=${PIPESTATUS[0]}
 set -e
 if (( OFFLINE_STATUS != 0 )); then
@@ -129,6 +143,7 @@ if (( OFFLINE_STATUS != 0 )); then
     fail 'Failed to install offline repository packages.'
     echo '--- Last offline pacman diagnostics ---' >&2
     tail -n 40 "$OFFLINE_LOG" >&2
+    dmesg | tail -n 30 >&2 || true
     echo '--- End offline pacman diagnostics ---' >&2
     exit 1
 fi
