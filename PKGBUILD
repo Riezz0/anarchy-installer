@@ -1,5 +1,5 @@
 pkgname=anarchy-installer
-pkgver=20260926.171258616511992
+pkgver=20260926.181216947546296
 pkgrel=1
 pkgdesc="Anarchy Arch Linux installer"
 arch=('any')

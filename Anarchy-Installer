@@ -77,6 +77,22 @@ LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
 [[ -d "$LOCAL_REPO" ]] || { fail "Missing $LOCAL_REPO in the ISO."; exit 1; }
 [[ -s "$LOCAL_REPO/anarchy-repo.install" ]] || { fail "Missing install manifest in $LOCAL_REPO."; exit 1; }
 
+# The ISO's custom repository contains Anarchy packages, not the full Arch
+# dependency tree. Keep the official repositories enabled for dependency
+# resolution, including multilib for the 32-bit Vulkan packages.
+append_arch_repositories() {
+    cat <<'REPOSITORIES'
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+REPOSITORIES
+}
+
 step 'Partitioning and formatting'
 sgdisk -Z "$TARGET_DRIVE"
 if "$IS_EFI"; then sgdisk -n 1:0:+512M -t 1:ef00 "$TARGET_DRIVE"; else sgdisk -n 1:0:+1M -t 1:ef02 "$TARGET_DRIVE"; fi
@@ -100,9 +116,10 @@ rm -f /mnt/var/cache/pacman/pkg/anarchy-installer-*.pkg.tar.*
 
 step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
 PACMAN_CONF=$(mktemp)
-# Keep only pacman's global options and the ISO repository. Do not leave the
-# live ISO's online Arch mirrors configured as fallbacks.
+# Keep pacman's global options, official Arch repositories, and the local
+# repository that ships with the ISO.
 awk '/^\[core\]$/ { exit } { print }' /etc/pacman.conf > "$PACMAN_CONF"
+append_arch_repositories >> "$PACMAN_CONF"
 printf '\n[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file://%s\n' \
     "$LOCAL_REPO" >> "$PACMAN_CONF"
 if ! pacstrap -C "$PACMAN_CONF" /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
@@ -116,7 +133,7 @@ fi
 rm -f "$PACMAN_CONF"
 [[ -x /mnt/bin/bash ]] || { fail 'Base system installation is incomplete.'; exit 1; }
 
-step 'Installing offline packages from anarchy-repo'
+step 'Installing packages from anarchy-repo'
 mapfile -t LOCAL_REPO_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.*' -print)
 (( ${#LOCAL_REPO_PACKAGES[@]} > 0 )) || { fail 'No local repository package archives found.'; exit 1; }
 mapfile -t INSTALL_REPO_PACKAGES < "$LOCAL_REPO/anarchy-repo.install"
@@ -125,11 +142,12 @@ info "Using local repository with ${#LOCAL_REPO_PACKAGES[@]} archives"
 mkdir -p /mnt/var/local/anarchy-repo
 mount --bind "$LOCAL_REPO" /mnt/var/local/anarchy-repo
 awk '/^\[core\]$/ { exit } { print }' /mnt/etc/pacman.conf > /mnt/etc/pacman.conf.anarchy
+append_arch_repositories >> /mnt/etc/pacman.conf.anarchy
 printf '\n[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file:///var/local/anarchy-repo\n' \
     >> /mnt/etc/pacman.conf.anarchy
 mv /mnt/etc/pacman.conf.anarchy /mnt/etc/pacman.conf
-OFFLINE_LOG=/tmp/anarchy-offline-pacman.log
-: > "$OFFLINE_LOG"
+PACMAN_LOG=/tmp/anarchy-pacman.log
+: > "$PACMAN_LOG"
 set +e
 arch-chroot /mnt bash -c '
     set -Eeuo pipefail
@@ -137,16 +155,16 @@ arch-chroot /mnt bash -c '
     mapfile -t packages < /var/local/anarchy-repo/anarchy-repo.install
     printf "Installing %s repository packages\\n" "${#packages[@]}"
     pacman -S --needed --noconfirm "${packages[@]}"
-' 2>&1 | tee "$OFFLINE_LOG"
-OFFLINE_STATUS=${PIPESTATUS[0]}
+' 2>&1 | tee "$PACMAN_LOG"
+PACMAN_STATUS=${PIPESTATUS[0]}
 set -e
-if (( OFFLINE_STATUS != 0 )); then
-    cp "$OFFLINE_LOG" /mnt/root/anarchy-offline-pacman.log 2>/dev/null || true
-    fail 'Failed to install offline repository packages.'
-    echo '--- Last offline pacman diagnostics ---' >&2
-    tail -n 40 "$OFFLINE_LOG" >&2
+if (( PACMAN_STATUS != 0 )); then
+    cp "$PACMAN_LOG" /mnt/root/anarchy-pacman.log 2>/dev/null || true
+    fail 'Failed to install packages from anarchy-repo.'
+    echo '--- Last pacman diagnostics ---' >&2
+    tail -n 40 "$PACMAN_LOG" >&2
     dmesg | tail -n 30 >&2 || true
-    echo '--- End offline pacman diagnostics ---' >&2
+    echo '--- End pacman diagnostics ---' >&2
     exit 1
 fi
 umount /mnt/var/local/anarchy-repo
