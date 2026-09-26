@@ -70,6 +70,22 @@ gum style --foreground "$FG" --border rounded --padding '1 2' \
     "$SUMMARY"
 gum confirm --affirmative 'Wipe drive' --negative 'Cancel' "Wipe $TARGET_DRIVE?" || exit 1
 
+step 'Preparing local package repositories'
+SQUASHFS=''
+for path in /run/archiso/bootmnt/arch/x86_64/airootfs.sfs /run/archiso/bootmnt/arch/x86_64/rootfs.sfs /mnt/iso/arch/x86_64/airootfs.sfs; do
+    [[ -f "$path" ]] && SQUASHFS="$path" && break
+done
+[[ -n "$SQUASHFS" ]] || SQUASHFS=$(gum input --prompt 'Path to airootfs.sfs: ')
+[[ -f "$SQUASHFS" ]] || { fail "SquashFS not found: $SQUASHFS"; exit 1; }
+SQUASHFS_MOUNT=/tmp/anarchy-installer-squashfs; mkdir -p "$SQUASHFS_MOUNT"
+SQUASHFS_LOOP=$(losetup --find --show "$SQUASHFS")
+mount -t squashfs -o ro "$SQUASHFS_LOOP" "$SQUASHFS_MOUNT"
+LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
+OFFLINE_REPO="$SQUASHFS_MOUNT/var/local/anarchy-offline-repo"
+[[ -d "$LOCAL_REPO" ]] || { fail "Missing $LOCAL_REPO in the ISO."; exit 1; }
+mapfile -t OFFLINE_PACKAGES < <(find "$OFFLINE_REPO" -maxdepth 1 -type f -name '*.pkg.tar.*' -print 2>/dev/null)
+info "Found ${#OFFLINE_PACKAGES[@]} locally cached system package archives"
+
 step 'Partitioning and formatting'
 sgdisk -Z "$TARGET_DRIVE"
 if "$IS_EFI"; then sgdisk -n 1:0:+512M -t 1:ef00 "$TARGET_DRIVE"; else sgdisk -n 1:0:+1M -t 1:ef02 "$TARGET_DRIVE"; fi
@@ -93,8 +109,26 @@ rm -f /mnt/var/cache/pacman/pkg/anarchy-installer-*.pkg.tar.*
 
 step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
 PACMAN_CONF=$(mktemp)
-# The local repository path belongs to the live ISO host, not /mnt.
-sed '/^\[anarchy-repo\]/,/^$/d' /etc/pacman.conf > "$PACMAN_CONF"
+# pacstrap reads package files from the mounted ISO, so use those local repos
+# first and retain the Arch mirrors as a fallback for anything not bundled.
+sed '/^\[anarchy-repo\]/,/^$/d; /^\[anarchy-offline\]/,/^$/d' /etc/pacman.conf |
+    awk -v offline_url="file://${OFFLINE_REPO}" \
+        -v repo_url="file://${LOCAL_REPO}" \
+        -v has_offline="${#OFFLINE_PACKAGES[@]}" '
+        /^\[core\]$/ {
+            print "[anarchy-repo]"
+            print "SigLevel = Optional TrustAll"
+            print "Server = " repo_url
+            print ""
+            if (has_offline > 0) {
+                print "[anarchy-offline]"
+                print "SigLevel = Optional TrustAll"
+                print "Server = " offline_url
+                print ""
+            }
+        }
+        { print }
+    ' > "$PACMAN_CONF"
 if ! pacstrap -C "$PACMAN_CONF" /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
     networkmanager hyprland uwsm pipewire pipewire-audio pipewire-alsa pipewire-pulse \
     wireplumber git stow zsh dkms base-devel sudo rsync curl "$MICROCODE_PACKAGE" \
@@ -107,26 +141,30 @@ rm -f "$PACMAN_CONF"
 [[ -x /mnt/bin/bash ]] || { fail 'Base system installation is incomplete.'; exit 1; }
 
 step 'Installing offline packages from anarchy-repo'
-SQUASHFS=''
-for path in /run/archiso/bootmnt/arch/x86_64/airootfs.sfs /run/archiso/bootmnt/arch/x86_64/rootfs.sfs /mnt/iso/arch/x86_64/airootfs.sfs; do
-    [[ -f "$path" ]] && SQUASHFS="$path" && break
-done
-[[ -n "$SQUASHFS" ]] || SQUASHFS=$(gum input --prompt 'Path to airootfs.sfs: ')
-[[ -f "$SQUASHFS" ]] || { fail "SquashFS not found: $SQUASHFS"; exit 1; }
-SQUASHFS_MOUNT=/tmp/anarchy-installer-squashfs; mkdir -p "$SQUASHFS_MOUNT"
-SQUASHFS_LOOP=$(losetup --find --show "$SQUASHFS"); mount -t squashfs -o ro "$SQUASHFS_LOOP" "$SQUASHFS_MOUNT"
-LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
-[[ -d "$LOCAL_REPO" ]] || { fail "Missing $LOCAL_REPO in the ISO."; exit 1; }
-mapfile -t OFFLINE_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.zst' -print)
-(( ${#OFFLINE_PACKAGES[@]} > 0 )) || { fail 'No offline package archives found.'; exit 1; }
-info "Embedding local repository with ${#OFFLINE_PACKAGES[@]} archives"
-rm -rf /mnt/var/local/anarchy-repo
+mapfile -t LOCAL_REPO_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.*' -print)
+(( ${#LOCAL_REPO_PACKAGES[@]} > 0 )) || { fail 'No local repository package archives found.'; exit 1; }
+info "Embedding local application repository with ${#LOCAL_REPO_PACKAGES[@]} archives"
 mkdir -p /mnt/var/local
 cp -a "$LOCAL_REPO" /mnt/var/local/anarchy-repo
-{
-    printf '[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file:///var/local/anarchy-repo\n\n'
-    cat /mnt/etc/pacman.conf
-} > /mnt/etc/pacman.conf.anarchy
+if (( ${#OFFLINE_PACKAGES[@]} > 0 )); then
+    cp -a "$OFFLINE_REPO" /mnt/var/local/anarchy-offline-repo
+fi
+sed '/^\[anarchy-repo\]/,/^$/d; /^\[anarchy-offline\]/,/^$/d' /mnt/etc/pacman.conf |
+    awk -v has_offline="${#OFFLINE_PACKAGES[@]}" '
+        /^\[core\]$/ {
+            print "[anarchy-repo]"
+            print "SigLevel = Optional TrustAll"
+            print "Server = file:///var/local/anarchy-repo"
+            print ""
+            if (has_offline > 0) {
+                print "[anarchy-offline]"
+                print "SigLevel = Optional TrustAll"
+                print "Server = file:///var/local/anarchy-offline-repo"
+                print ""
+            }
+        }
+        { print }
+    ' > /mnt/etc/pacman.conf.anarchy
 mv /mnt/etc/pacman.conf.anarchy /mnt/etc/pacman.conf
 OFFLINE_LOG=/tmp/anarchy-offline-pacman.log
 : > "$OFFLINE_LOG"
@@ -149,7 +187,7 @@ if (( OFFLINE_STATUS != 0 )); then
     echo '--- End offline pacman diagnostics ---' >&2
     exit 1
 fi
-rm -rf /mnt/var/local/anarchy-repo
+rm -rf /mnt/var/local/anarchy-repo /mnt/var/local/anarchy-offline-repo
 
 step 'Configuring the installed system'
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -167,7 +205,7 @@ BINARIES=()
 FILES=()
 HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
 MKINIT
-sed -i '/^\[anarchy-repo\]/,/^$/d' /etc/pacman.conf
+sed -i '/^\[anarchy-repo\]/,/^$/d; /^\[anarchy-offline\]/,/^$/d' /etc/pacman.conf
 if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
     printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
 fi
