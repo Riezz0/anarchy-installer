@@ -100,18 +100,11 @@ rm -f /mnt/var/cache/pacman/pkg/anarchy-installer-*.pkg.tar.*
 
 step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
 PACMAN_CONF=$(mktemp)
-# pacstrap reads package files from the mounted ISO, so use the local repo first
-# and retain the Arch mirrors as a fallback for anything not bundled.
-sed '/^\[anarchy-repo\]/,/^$/d; /^\[anarchy-offline\]/,/^$/d' /etc/pacman.conf |
-    awk -v repo_url="file://${LOCAL_REPO}" '
-        /^\[core\]$/ {
-            print "[anarchy-repo]"
-            print "SigLevel = Optional TrustAll"
-            print "Server = " repo_url
-            print ""
-        }
-        { print }
-    ' > "$PACMAN_CONF"
+# Keep only pacman's global options and the ISO repository. Do not leave the
+# live ISO's online Arch mirrors configured as fallbacks.
+awk '/^\[core\]$/ { exit } { print }' /etc/pacman.conf > "$PACMAN_CONF"
+printf '\n[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file://%s\n' \
+    "$LOCAL_REPO" >> "$PACMAN_CONF"
 if ! pacstrap -C "$PACMAN_CONF" /mnt base linux-zen linux-zen-headers linux-firmware btrfs-progs grub sddm \
     networkmanager hyprland uwsm pipewire pipewire-audio pipewire-alsa pipewire-pulse \
     wireplumber git stow zsh dkms base-devel sudo rsync curl "$MICROCODE_PACKAGE" \
@@ -131,16 +124,9 @@ mapfile -t INSTALL_REPO_PACKAGES < "$LOCAL_REPO/anarchy-repo.install"
 info "Using local repository with ${#LOCAL_REPO_PACKAGES[@]} archives"
 mkdir -p /mnt/var/local/anarchy-repo
 mount --bind "$LOCAL_REPO" /mnt/var/local/anarchy-repo
-sed '/^\[anarchy-repo\]/,/^$/d; /^\[anarchy-offline\]/,/^$/d' /mnt/etc/pacman.conf |
-    awk '
-        /^\[core\]$/ {
-            print "[anarchy-repo]"
-            print "SigLevel = Optional TrustAll"
-            print "Server = file:///var/local/anarchy-repo"
-            print ""
-        }
-        { print }
-    ' > /mnt/etc/pacman.conf.anarchy
+awk '/^\[core\]$/ { exit } { print }' /mnt/etc/pacman.conf > /mnt/etc/pacman.conf.anarchy
+printf '\n[anarchy-repo]\nSigLevel = Optional TrustAll\nServer = file:///var/local/anarchy-repo\n' \
+    >> /mnt/etc/pacman.conf.anarchy
 mv /mnt/etc/pacman.conf.anarchy /mnt/etc/pacman.conf
 OFFLINE_LOG=/tmp/anarchy-offline-pacman.log
 : > "$OFFLINE_LOG"
