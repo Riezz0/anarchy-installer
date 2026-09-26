@@ -46,15 +46,8 @@ NEW_PASS=$(gum input --password --prompt 'User password: '); [[ -n "$NEW_PASS" ]
 TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder 'Select timezone'); TIMEZONE=${TIMEZONE:-UTC}
 NEW_HOSTNAME=$(gum input --prompt 'Hostname: '); [[ -n "$NEW_HOSTNAME" ]] || exit 1
 
-MICROCODE=$(gum choose --header 'CPU microcode' 'Intel (intel-ucode)' 'AMD (amd-ucode)')
-case "$MICROCODE" in Intel*) MICROCODE_PACKAGE=intel-ucode;; AMD*) MICROCODE_PACKAGE=amd-ucode;; *) exit 1;; esac
-GPU=$(gum choose --header 'GPU driver' 'NVIDIA (nvidia)' 'AMD (Mesa/Vulkan)' 'Intel (Mesa/Vulkan)')
-case "$GPU" in
-    NVIDIA*) GPU_PACKAGES=(nvidia nvidia-utils lib32-nvidia-utils);;
-    AMD*) GPU_PACKAGES=(mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon);;
-    Intel*) GPU_PACKAGES=(mesa lib32-mesa vulkan-intel lib32-vulkan-intel);;
-    *) exit 1;;
-esac
+MICROCODE_PACKAGE=amd-ucode
+GPU_PACKAGES=(mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon)
 AUR_HELPER=$(gum choose --header 'AUR helper' 'yay' 'paru' 'pikaur')
 [[ "$AUR_HELPER" =~ ^(yay|paru|pikaur)$ ]] || exit 1
 INSTALL_CHAOTIC_AUR=false
@@ -63,9 +56,9 @@ EFI_PACKAGES=(); "$IS_EFI" && EFI_PACKAGES=(efibootmgr)
 DOTFILES="/home/$NEW_USER/anarchydots"
 
 banner Summary
-SUMMARY=$(printf 'User: %s\nTimezone: %s\nHostname: %s\nDrive: %s\nGPU: %s\nMicrocode: %s\nKernel: linux-zen\nAudio: PipeWire\nAUR: %s\nChaotic-AUR: %s' \
-    "$NEW_USER" "$TIMEZONE" "$NEW_HOSTNAME" "$TARGET_DRIVE" "$GPU" \
-    "$MICROCODE" "$AUR_HELPER" "$INSTALL_CHAOTIC_AUR")
+SUMMARY=$(printf 'User: %s\nTimezone: %s\nHostname: %s\nDrive: %s\nGPU: AMD (Mesa/Vulkan)\nMicrocode: AMD (amd-ucode)\nKernel: linux-zen\nAudio: PipeWire\nAUR: %s\nChaotic-AUR: %s' \
+    "$NEW_USER" "$TIMEZONE" "$NEW_HOSTNAME" "$TARGET_DRIVE" \
+    "$AUR_HELPER" "$INSTALL_CHAOTIC_AUR")
 gum style --foreground "$FG" --border rounded --padding '1 2' \
     "$SUMMARY"
 gum confirm --affirmative 'Wipe drive' --negative 'Cancel' "Wipe $TARGET_DRIVE?" || exit 1
@@ -81,10 +74,8 @@ SQUASHFS_MOUNT=/tmp/anarchy-installer-squashfs; mkdir -p "$SQUASHFS_MOUNT"
 SQUASHFS_LOOP=$(losetup --find --show "$SQUASHFS")
 mount -t squashfs -o ro "$SQUASHFS_LOOP" "$SQUASHFS_MOUNT"
 LOCAL_REPO="$SQUASHFS_MOUNT/var/local/anarchy-repo"
-OFFLINE_REPO="$SQUASHFS_MOUNT/var/local/anarchy-offline-repo"
 [[ -d "$LOCAL_REPO" ]] || { fail "Missing $LOCAL_REPO in the ISO."; exit 1; }
-mapfile -t OFFLINE_PACKAGES < <(find "$OFFLINE_REPO" -maxdepth 1 -type f -name '*.pkg.tar.*' -print 2>/dev/null)
-info "Found ${#OFFLINE_PACKAGES[@]} locally cached system package archives"
+[[ -s "$LOCAL_REPO/anarchy-repo.install" ]] || { fail "Missing install manifest in $LOCAL_REPO."; exit 1; }
 
 step 'Partitioning and formatting'
 sgdisk -Z "$TARGET_DRIVE"
@@ -109,23 +100,15 @@ rm -f /mnt/var/cache/pacman/pkg/anarchy-installer-*.pkg.tar.*
 
 step 'Installing base system, Hyprland, PipeWire, SDDM, and linux-zen'
 PACMAN_CONF=$(mktemp)
-# pacstrap reads package files from the mounted ISO, so use those local repos
-# first and retain the Arch mirrors as a fallback for anything not bundled.
+# pacstrap reads package files from the mounted ISO, so use the local repo first
+# and retain the Arch mirrors as a fallback for anything not bundled.
 sed '/^\[anarchy-repo\]/,/^$/d; /^\[anarchy-offline\]/,/^$/d' /etc/pacman.conf |
-    awk -v offline_url="file://${OFFLINE_REPO}" \
-        -v repo_url="file://${LOCAL_REPO}" \
-        -v has_offline="${#OFFLINE_PACKAGES[@]}" '
+    awk -v repo_url="file://${LOCAL_REPO}" '
         /^\[core\]$/ {
             print "[anarchy-repo]"
             print "SigLevel = Optional TrustAll"
             print "Server = " repo_url
             print ""
-            if (has_offline > 0) {
-                print "[anarchy-offline]"
-                print "SigLevel = Optional TrustAll"
-                print "Server = " offline_url
-                print ""
-            }
         }
         { print }
     ' > "$PACMAN_CONF"
@@ -143,25 +126,18 @@ rm -f "$PACMAN_CONF"
 step 'Installing offline packages from anarchy-repo'
 mapfile -t LOCAL_REPO_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.*' -print)
 (( ${#LOCAL_REPO_PACKAGES[@]} > 0 )) || { fail 'No local repository package archives found.'; exit 1; }
-info "Embedding local application repository with ${#LOCAL_REPO_PACKAGES[@]} archives"
-mkdir -p /mnt/var/local
-cp -a "$LOCAL_REPO" /mnt/var/local/anarchy-repo
-if (( ${#OFFLINE_PACKAGES[@]} > 0 )); then
-    cp -a "$OFFLINE_REPO" /mnt/var/local/anarchy-offline-repo
-fi
+mapfile -t INSTALL_REPO_PACKAGES < "$LOCAL_REPO/anarchy-repo.install"
+(( ${#INSTALL_REPO_PACKAGES[@]} > 0 )) || { fail 'Local repository install manifest is empty.'; exit 1; }
+info "Using local repository with ${#LOCAL_REPO_PACKAGES[@]} archives"
+mkdir -p /mnt/var/local/anarchy-repo
+mount --bind "$LOCAL_REPO" /mnt/var/local/anarchy-repo
 sed '/^\[anarchy-repo\]/,/^$/d; /^\[anarchy-offline\]/,/^$/d' /mnt/etc/pacman.conf |
-    awk -v has_offline="${#OFFLINE_PACKAGES[@]}" '
+    awk '
         /^\[core\]$/ {
             print "[anarchy-repo]"
             print "SigLevel = Optional TrustAll"
             print "Server = file:///var/local/anarchy-repo"
             print ""
-            if (has_offline > 0) {
-                print "[anarchy-offline]"
-                print "SigLevel = Optional TrustAll"
-                print "Server = file:///var/local/anarchy-offline-repo"
-                print ""
-            }
         }
         { print }
     ' > /mnt/etc/pacman.conf.anarchy
@@ -172,7 +148,7 @@ set +e
 arch-chroot /mnt bash -c '
     set -Eeuo pipefail
     pacman -Sy --noconfirm
-    mapfile -t packages < <(pacman -Sl anarchy-repo | awk "{print \$2}")
+    mapfile -t packages < /var/local/anarchy-repo/anarchy-repo.install
     printf "Installing %s repository packages\\n" "${#packages[@]}"
     pacman -S --needed --noconfirm "${packages[@]}"
 ' 2>&1 | tee "$OFFLINE_LOG"
@@ -187,7 +163,8 @@ if (( OFFLINE_STATUS != 0 )); then
     echo '--- End offline pacman diagnostics ---' >&2
     exit 1
 fi
-rm -rf /mnt/var/local/anarchy-repo /mnt/var/local/anarchy-offline-repo
+umount /mnt/var/local/anarchy-repo
+rmdir /mnt/var/local/anarchy-repo
 
 step 'Configuring the installed system'
 genfstab -U /mnt >> /mnt/etc/fstab
