@@ -233,7 +233,7 @@ if command -v gsettings >/dev/null && command -v dbus-run-session >/dev/null && 
 fi
 
 rm -rf '$DOTFILES/nct6687d' '$DOTFILES/.config' '$DOTFILES/.local' '$DOTFILES/.cache' '$DOTFILES/.oh-my-zsh'
-cd '$DOTFILES'; stow -t /usr/local scripts; sudo -u '$NEW_USER' stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t '/home/$NEW_USER'
+cd '$DOTFILES'; stow -t /usr/local scripts; sudo -u '$NEW_USER' stow --restow bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum neovim omz opencode pywal qt5 qt6 quickshell rofi themes wal xkb zsh -t '/home/$NEW_USER'
 install -d /usr/share/icons; cp -r '$DOTFILES'/cursors/.local/share/icons/bibata_* /usr/share/icons/; cp -r '$DOTFILES/cursors/.local/share/icons/default' /usr/share/icons/
 install -d -o '$NEW_USER' -g '$NEW_USER' '/home/$NEW_USER/.local/share/fonts'; cp -r '$DOTFILES/fonts/.' '/home/$NEW_USER/.local/share/fonts/'
 cp '$DOTFILES/sys/no_nct6683.conf' /etc/modprobe.d/no_nct6683.conf; cp '$DOTFILES/sys/nct6687.conf' /etc/modules-load.d/nct6687.conf
