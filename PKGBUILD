@@ -6,7 +6,7 @@ arch=('any')
 license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet' 'python' 'python-gobject' 'libadwaita')
-source=('Anarchy-Launcher' 'Anarchy-Installer' 'test.sh')
+source=('Anarchy-Launcher' 'Anarchy-Installer' 'Anarchy-Installer-Offline')
 sha256sums=('SKIP' 'SKIP' 'SKIP')
 
 pkgver() {
