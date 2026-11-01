@@ -1,5 +1,5 @@
 pkgname=anarchy-installer
-pkgver=20261031.050414902274602
+pkgver=20261101.123002147078136
 pkgrel=1
 pkgdesc="Anarchy Arch Linux installer"
 arch=('any')
@@ -7,7 +7,7 @@ license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet' 'python' 'python-gobject' 'libadwaita')
 source=('Anarchy-Launcher' 'Anarchy-Installer' 'test.sh')
-sha256sums=('SKIP' 'SKIP')
+sha256sums=('SKIP' 'SKIP' 'SKIP')
 
 pkgver() {
     date -u +%Y%m%d.%H%M%S%N
