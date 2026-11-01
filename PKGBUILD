@@ -1,12 +1,12 @@
 pkgname=anarchy-installer
-pkgver=20260926.185125788844588
+pkgver=20261031.050414902274602
 pkgrel=1
 pkgdesc="Anarchy Arch Linux installer"
 arch=('any')
 license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet' 'python' 'python-gobject' 'libadwaita')
-source=('Anarchy-Launcher' 'Anarchy-Installer')
+source=('Anarchy-Launcher' 'Anarchy-Installer' 'test.sh')
 sha256sums=('SKIP' 'SKIP')
 
 pkgver() {
@@ -18,4 +18,6 @@ package() {
         "$pkgdir/usr/local/bin/Anarchy-Launcher"
     install -Dm755 "$srcdir/Anarchy-Installer" \
         "$pkgdir/usr/local/bin/Anarchy-Installer"
+    install -Dm755 "$srcdir/Anarchy-Installer" \
+        "$pkgdir/usr/local/bin/test.sh"
 }
