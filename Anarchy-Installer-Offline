@@ -41,9 +41,46 @@ else
 fi
 
 # --- 3. CONFIGURATION VARIABLES ---
-HOSTNAME="arch-zen-hyprland"
+HOSTNAME="chronicles"
 TIMEZONE="UTC"
 KEYMAP="us"
+
+
+echo "=================================================="
+echo "          USER ACCOUNT CONFIGURATION              "
+echo "=================================================="
+# Prompt for username (forces lowercase alphanumeric)
+while true; do
+    read -rp "Enter username for the new system: " NEW_USER
+    if [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        break
+    fi
+    echo "❌ Invalid username. Use lowercase letters and numbers only."
+done
+
+# Prompt for password cleanly without echo leaking characters to terminal canvas
+while true; do
+    read -rsp "Enter password for $NEW_USER: " USER_PASS
+    echo ""
+    read -rsp "Confirm password for $NEW_USER: " USER_PASS_CONFIRM
+    echo ""
+    if [ "$USER_PASS" = "$USER_PASS_CONFIRM" ] && [ -n "$USER_PASS" ]; then
+        break
+    fi
+    echo "❌ Passwords do not match or are empty. Please try again."
+done
+
+while true; do
+    read -rsp "Enter new password for root user: " ROOT_PASS
+    echo ""
+    read -rsp "Confirm password for root user: " ROOT_PASS_CONFIRM
+    echo ""
+    if [ "$ROOT_PASS" = "$ROOT_PASS_CONFIRM" ] && [ -n "$ROOT_PASS" ]; then
+        break
+    fi
+    echo "❌ Passwords do not match or are empty. Please try again."
+done
+echo "=================================================="
 
 # --- 4. DESTRUCTION CONFIRMATION ---
 echo ""
@@ -124,6 +161,42 @@ grub-mkconfig -o /boot/grub/grub.cfg
 
 # Define fallback root profile authentication credentials
 echo "root:root" | chpasswd
+
+echo "==> Entering chroot environment for internal personalization..."
+cat <<CHROOT_EOF | arch-chroot /mnt
+
+# Setup localization and clocks
+echo "LANG=en_US.UTF-8" > /etc/locale.gen
+echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
+hwclock --systohc
+
+# Loopback system network definitions
+echo "$HOSTNAME" > /etc/hostname
+cat <<NET_EOF > /etc/hosts
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOSTNAME.localdomain $HOSTNAME
+NET_EOF
+
+# Activate background system utilities
+systemctl enable NetworkManager
+systemctl enable sddm
+
+# Create standard system user account dynamically from variables
+echo "==> Creating standard system user account: $NEW_USER..."
+useradd -m -G wheel -s /bin/bash "$NEW_USER"
+
+# Assign custom password hashes explicitly
+echo "root:$ROOT_PASS" | chpasswd
+echo "$NEW_USER:$USER_PASS" | chpasswd
+
+# Grant secure passwordless sudo access rules to the wheel group framework
+echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-installer-wheel
+
+# Compile standalone UEFI bootloader (GRUB handles the Zen kernel cleanly)
+grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --removable
+grub-mkconfig -o /boot/grub/grub.cfg
 
 CHROOT_EOF
 
