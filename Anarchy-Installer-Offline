@@ -2,7 +2,19 @@
 # ==============================================================================
 # INTEGRATED STRICTLY OFFLINE ARCH LINUX INSTALLER (UEFI ONLY)
 # ==============================================================================
-set -e
+set -Eeuo pipefail
+
+if (( EUID != 0 )); then
+    echo "❌ Error: Run this installer as root." >&2
+    exit 1
+fi
+
+for command in lsblk grep sgdisk mkfs.vfat mkfs.ext4 mount mountpoint pacstrap genfstab arch-chroot; do
+    if ! command -v "$command" >/dev/null 2>&1; then
+        echo "❌ Error: Required command '$command' is missing from the live environment." >&2
+        exit 1
+    fi
+done
 
 LOCAL_REPO_DIR="/opt/arch-offline-repo"
 
@@ -156,41 +168,51 @@ genfstab -U /mnt >> /mnt/etc/fstab
 
 # --- INTERNAL SYSTEM PROVISIONING (CHROOT) ---
 echo "==> Entering chroot environment for internal personalization..."
-cat <<CHROOT_EOF | arch-chroot /mnt
+if ! mountpoint -q /mnt || [[ ! -x /mnt/bin/bash || ! -d /mnt/etc ]]; then
+    echo "❌ Error: /mnt is not a mounted, bootstrapped target system; refusing to configure it." >&2
+    exit 1
+fi
 
-# Setup localization and clocks
-echo "LANG=en_US.UTF-8" > /etc/locale.gen
-echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
-ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
-hwclock --systohc
+# Pass configuration over stdin rather than embedding another shell heredoc.
+# This avoids delimiter/paste errors and keeps passwords out of process args.
+printf '%s\n' "$KEYMAP" "$TIMEZONE" "$HOSTNAME" "$NEW_USER" "$USER_PASS" "$ROOT_PASS" |
+    arch-chroot /mnt /bin/bash -c '
+        set -Eeuo pipefail
+        IFS= read -r KEYMAP
+        IFS= read -r TIMEZONE
+        IFS= read -r HOSTNAME
+        IFS= read -r NEW_USER
+        IFS= read -r USER_PASS
+        IFS= read -r ROOT_PASS
 
-# Loopback system network definitions
-echo "$HOSTNAME" > /etc/hostname
-cat <<NET_EOF > /etc/hosts
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   $HOSTNAME.localdomain $HOSTNAME
-NET_EOF
+        # Setup localization and clocks
+        echo "LANG=en_US.UTF-8" > /etc/locale.gen
+        echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+        ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+        hwclock --systohc
 
-# Activate background system utilities
-systemctl enable NetworkManager
-systemctl enable sddm
+        # Loopback system network definitions
+        echo "$HOSTNAME" > /etc/hostname
+        printf "127.0.0.1   localhost\n::1         localhost\n127.0.1.1   %s.localdomain %s\n" \
+            "$HOSTNAME" "$HOSTNAME" > /etc/hosts
 
-# Create standard user
-useradd -m -G wheel -s /bin/bash "$NEW_USER"
+        # Activate background system utilities
+        systemctl enable NetworkManager
+        systemctl enable sddm
 
-# Assign passwords
-echo "root:$ROOT_PASS" | chpasswd
-echo "$NEW_USER:$USER_PASS" | chpasswd
+        # Create standard user
+        useradd -m -G wheel -s /bin/bash "$NEW_USER"
 
-# Grant wheel permission configurations
-echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-installer-wheel
+        # Assign passwords
+        printf "root:%s\n%s:%s\n" "$ROOT_PASS" "$NEW_USER" "$USER_PASS" | chpasswd
 
-# Compile UEFI GRUB Bootloader
-grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --removable
-grub-mkconfig -o /boot/grub/grub.cfg
+        # Grant wheel permission configurations
+        echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-installer-wheel
 
-CHROOT_EOF
+        # Compile UEFI GRUB Bootloader
+        grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --removable
+        grub-mkconfig -o /boot/grub/grub.cfg
+    '
 
 echo "==> Safely unmounting storage arrays..."
 umount -R /mnt
