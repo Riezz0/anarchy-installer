@@ -162,7 +162,7 @@ echo "==> Executing pure offline pacstrap deployment..."
 pacstrap -C /tmp/pacman-offline.conf -K /mnt \
     base linux-zen linux-zen-headers linux-firmware grub efibootmgr networkmanager nano sudo \
     sddm uwsm hyprland kitty waybar dunst rofi-wayland mesa pipewire pipewire-audio wireplumber \
-    arch-install-scripts xorg-xwayland
+    arch-install-scripts xorg-xwayland firefox foot nautilus
 
 echo "==> Generating filesystem fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
