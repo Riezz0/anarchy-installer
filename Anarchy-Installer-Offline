@@ -216,10 +216,33 @@ printf '%s\n' "$KEYMAP" "$TIMEZONE" "$HOSTNAME" "$NEW_USER" "$USER_PASS" "$ROOT_
     '
 
 echo "==> Safely unmounting storage arrays..."
-umount -R /mnt
+cd /
+sync
+if command -v fuser >/dev/null 2>&1; then
+    MOUNT_PIDS=$(fuser -m /mnt 2>/dev/null || true)
+    for pid in $MOUNT_PIDS; do
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        [[ -r "/proc/$pid/comm" ]] || continue
+        IFS= read -r process_name < "/proc/$pid/comm" || continue
+        if [[ "$process_name" == gpg-agent ]]; then
+            echo "==> Stopping gpg-agent (PID $pid) holding the target filesystem..."
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
+    sleep 1
+fi
+if ! umount -R /mnt; then
+    echo "❌ Error: Could not unmount /mnt. The installed system is configured, but a process or mount is still using it." >&2
+    findmnt -R /mnt >&2 || true
+    if command -v fuser >/dev/null 2>&1; then
+        fuser -vm /mnt >&2 || true
+    else
+        echo "   'fuser' is unavailable; inspect processes using /mnt before retrying." >&2
+    fi
+    exit 1
+fi
 
 echo "======================================================================"
 echo " 🎉 SUCCESS! Strict offline system installation complete."
 echo " Power down the device, extract your live USB, and reboot."
 echo "======================================================================"
-
