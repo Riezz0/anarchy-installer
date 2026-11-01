@@ -1,5 +1,5 @@
 pkgname=anarchy-installer
-pkgver=20261101.133136372139986
+pkgver=20261101.151224834640759
 pkgrel=1
 pkgdesc="Anarchy Arch Linux installer"
 arch=('any')
@@ -18,6 +18,6 @@ package() {
         "$pkgdir/usr/local/bin/Anarchy-Launcher"
     install -Dm755 "$srcdir/Anarchy-Installer" \
         "$pkgdir/usr/local/bin/Anarchy-Installer"
-    install -Dm755 "$srcdir/Anarchy-Installer" \
+    install -Dm755 "$srcdir/Anarchy-Installer-Offline" \
         "$pkgdir/usr/local/bin/Anarchy-Installer-Offline"
 }
