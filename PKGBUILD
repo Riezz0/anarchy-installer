@@ -19,5 +19,5 @@ package() {
     install -Dm755 "$srcdir/Anarchy-Installer" \
         "$pkgdir/usr/local/bin/Anarchy-Installer"
     install -Dm755 "$srcdir/Anarchy-Installer" \
-        "$pkgdir/usr/local/bin/test.sh"
+        "$pkgdir/usr/local/bin/Anarchy-Installer-Offline"
 }
