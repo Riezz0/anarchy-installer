@@ -46,6 +46,7 @@ NEW_USER=$(gum input --prompt 'Username: '); [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]
 NEW_PASS=$(gum input --password --prompt 'User password: '); [[ -n "$NEW_PASS" ]] || exit 1
 TIMEZONE=$(timedatectl list-timezones | gum filter --placeholder 'Select timezone'); TIMEZONE=${TIMEZONE:-UTC}
 NEW_HOSTNAME=$(gum input --prompt 'Hostname: '); [[ -n "$NEW_HOSTNAME" ]] || exit 1
+DOTFILES="/home/$NEW_USER/anarchydots"
 
 MICROCODE_PACKAGE=amd-ucode
 GPU_PACKAGES=(mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon)
@@ -79,8 +80,7 @@ for required_path in \
     "$DOTFILES_BUNDLE/sys/sddm/anarchy-sddm" \
     "$DOTFILES_BUNDLE/sys/sddm/sddm.conf" \
     "$DOTFILES_BUNDLE/sys/sddm/initial-setup" \
-    "$DOTFILES_BUNDLE/sys/fonts" \
-    "$DOTFILES_BUNDLE/scripts/bin"; do
+    "$DOTFILES_BUNDLE/sys/fonts"; do
     [[ -e "$required_path" ]] || { fail "Missing offline desktop asset: $required_path. Rebuild the ISO."; exit 1; }
 done
 
@@ -173,7 +173,7 @@ fi
 # Seed new users from the customized live ISO and stage system-wide assets.
 cp -a /etc/skel/. /mnt/etc/skel/
 mkdir -p /mnt/var/local/anarchy-dots
-cp -a "$DOTFILES_BUNDLE"/sys "$DOTFILES_BUNDLE"/scripts /mnt/var/local/anarchy-dots/
+cp -a "$DOTFILES_BUNDLE"/sys /mnt/var/local/anarchy-dots/
 
 step 'Installing packages from anarchy-repo'
 mapfile -t LOCAL_REPO_PACKAGES < <(find "$LOCAL_REPO" -maxdepth 1 -type f -name '*.pkg.tar.*' -print)
@@ -240,7 +240,9 @@ HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesy
 MKINIT
 mkinitcpio -P
 if $IS_EFI; then grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck; else grub-install --target=i386-pc '$TARGET_DRIVE' --recheck; fi
-useradd -m -G wheel -s /bin/bash '$NEW_USER'
+install -d -m 0755 /var/lib/anarchy-empty-skel
+useradd -m -k /var/lib/anarchy-empty-skel -G wheel -s /bin/bash '$NEW_USER'
+rmdir /var/lib/anarchy-empty-skel
 echo '$NEW_USER:$NEW_PASS' | chpasswd
 echo 'root:$ROOT_PASS' | chpasswd
 sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
@@ -264,8 +266,13 @@ if command -v gsettings >/dev/null && command -v dbus-run-session >/dev/null && 
     su - '$NEW_USER' -c 'dbus-run-session -- gsettings set com.github.stunkymonkey.nautilus-open-any-terminal new-tab true'
 fi
 
-mkdir -p /usr/local/bin
-cp -a /var/local/anarchy-dots/scripts/bin/. /usr/local/bin/
+# Restore the Stow-managed user and system dotfiles from the upstream repo.
+runuser -u '$NEW_USER' -- git clone --depth 1 https://github.com/Riezz0/anarchydots '$DOTFILES'
+rm -rf '$DOTFILES/nct6687d' '$DOTFILES/.config' '$DOTFILES/.local' '$DOTFILES/.cache' '$DOTFILES/.oh-my-zsh'
+stow --restow --dir='$DOTFILES' --target=/usr/local scripts
+runuser -u '$NEW_USER' -- stow --restow --dir='$DOTFILES' --target='/home/$NEW_USER' \
+    bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty kvantum \
+    neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh
 install -d -o '$NEW_USER' -g '$NEW_USER' '/home/$NEW_USER/.local/share/fonts'
 cp -a /var/local/anarchy-dots/sys/fonts/. '/home/$NEW_USER/.local/share/fonts/'
 chsh -s /bin/zsh '$NEW_USER'

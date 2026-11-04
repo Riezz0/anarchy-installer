@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# INTEGRATED STRICTLY OFFLINE ARCH LINUX INSTALLER (UEFI ONLY)
+# ==============================================================================
+set -Eeuo pipefail
+
+if (( EUID != 0 )); then
+    echo "❌ Error: Run this installer as root." >&2
+    exit 1
+fi
+
+for command in lsblk grep sgdisk mkfs.vfat mkfs.ext4 mount mountpoint pacstrap genfstab arch-chroot; do
+    if ! command -v "$command" >/dev/null 2>&1; then
+        echo "❌ Error: Required command '$command' is missing from the live environment." >&2
+        exit 1
+    fi
+done
+
+LOCAL_REPO_DIR="/opt/arch-offline-repo"
+
+if [ ! -d "$LOCAL_REPO_DIR" ] || [ ! -f "$LOCAL_REPO_DIR/offline_repo.db" ]; then
+    echo "❌ Error: Built-in repository or database index not found at $LOCAL_REPO_DIR"
+    exit 1
+fi
+
+# --- DYNAMIC DRIVE SELECTION ---
+echo "=================================================="
+echo "          AVAILABLE STORAGE DRIVES                "
+echo "=================================================="
+lsblk -dno NAME,SIZE,MODEL | grep -v "loop"
+echo "=================================================="
+echo ""
+
+while true; do
+    read -rp "Enter the disk name to install Arch onto (e.g., sda, nvme0n1): " DISK_NAME
+    DISK="/dev/$DISK_NAME"
+    if [ -b "$DISK" ]; then
+        break
+    fi
+    echo "❌ Invalid block device. Please pick a drive listed above."
+done
+
+if [[ "$DISK" == *"nvme"* ]] || [[ "$DISK" == *"mmcblk"* ]]; then
+    EFI_PART="${DISK}p1"
+    ROOT_PART="${DISK}p2"
+else
+    EFI_PART="${DISK}1"
+    ROOT_PART="${DISK}2"
+fi
+
+# --- USER ACCOUNT CONFIGURATION PROMPTS ---
+HOSTNAME="arch-zen-hyprland"
+KEYMAP="us"
+
+echo "=================================================="
+echo "          USER ACCOUNT CONFIGURATION              "
+echo "=================================================="
+while true; do
+    read -rp "Enter username for the new system: " NEW_USER
+    if [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        break
+    fi
+    echo "❌ Invalid username. Use lowercase letters and numbers only."
+done
+
+while true; do
+    read -rsp "Enter password for $NEW_USER: " USER_PASS
+    echo ""
+    read -rsp "Confirm password for $NEW_USER: " USER_PASS_CONFIRM
+    echo ""
+    if [ "$USER_PASS" = "$USER_PASS_CONFIRM" ] && [ -n "$USER_PASS" ]; then
+        break
+    fi
+    echo "❌ Passwords do not match or are empty. Please try again."
+done
+
+while true; do
+    read -rsp "Enter new password for root user: " ROOT_PASS
+    echo ""
+    read -rsp "Confirm password for root user: " ROOT_PASS_CONFIRM
+    echo ""
+    if [ "$ROOT_PASS" = "$ROOT_PASS_CONFIRM" ] && [ -n "$ROOT_PASS" ]; then
+        break
+    fi
+    echo "❌ Passwords do not match or are empty. Please try again."
+done
+
+# --- TIMEZONE CONFIGURATION PROMPT ---
+echo "=================================================="
+echo "            TIMEZONE CONFIGURATION                "
+echo "=================================================="
+echo "Available Regions:"
+echo "Africa, America, Antarctica, Arctic, Asia, Atlantic, Australia, Europe, Indian, Pacific"
+echo "--------------------------------------------------"
+
+while true; do
+    read -rp "Enter your Region (e.g., America, Europe): " REGION
+    REGION="$(echo "${REGION:0:1}" | tr '[:lower:]' '[:upper:]')${REGION:1}"
+    
+    if [ -d "/usr/share/zoneinfo/$REGION" ]; then
+        echo ""
+        echo "Available Cities/Zones in $REGION:"
+        ls /usr/share/zoneinfo/$REGION | column
+        echo "--------------------------------------------------"
+        
+        read -rp "Enter your City/Zone (e.g., New_York, London): " CITY
+        CITY="$(echo "${CITY:0:1}" | tr '[:lower:]' '[:upper:]')${CITY:1}"
+        
+        if [ -f "/usr/share/zoneinfo/$REGION/$CITY" ]; then
+            TIMEZONE="$REGION/$CITY"
+            echo "✅ Selected Timezone: $TIMEZONE"
+            break
+        else
+            echo "❌ City mismatch. Please retry selection."
+        fi
+    else
+        echo "❌ Region mapping invalid. Please pick a valid macro region."
+    fi
+done
+echo "=================================================="
+
+echo ""
+echo "⚠️  CRITICAL WARNING: This process will completely wipe $DISK."
+read -rp "Are you absolutely certain you want to proceed? (y/N): " CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "Installation aborted by user."
+    exit 1
+fi
+
+# --- DISK PARTITIONING & FORMATTING ---
+echo "==> Partitioning target drive $DISK..."
+sgdisk --clear "$DISK"
+sgdisk --new=1:0:+512M --typecode=1:ef00 --change-name=1:"EFI" "$DISK"
+sgdisk --new=2:0:0      --typecode=2:8300 --change-name=2:"ROOT" "$DISK"
+
+sleep 2
+
+echo "==> Formatting filesystems..."
+mkfs.vfat -F 32 "$EFI_PART"
+mkfs.ext4 -F "$ROOT_PART"
+
+echo "==> Mounting system filesystems..."
+mount "$ROOT_PART" /mnt
+mkdir -p /mnt/boot/efi
+mount "$EFI_PART" /mnt/boot/efi
+
+# --- CONFIGURE PACMAN FOR ISOLATION ---
+echo "==> Structuring strict offline repository isolation..."
+cat <<EOF > /tmp/pacman-offline.conf
+[options]
+Architecture = auto
+SigLevel = Optional TrustAll
+LocalFileSigLevel = Optional
+
+[offline_repo]
+SigLevel = Optional TrustAll
+Server = file://$LOCAL_REPO_DIR
+EOF
+
+# --- PACSTRAP SEQUENCE ---
+echo "==> Executing pure offline pacstrap deployment..."
+pacstrap -C /tmp/pacman-offline.conf -K /mnt \
+    base linux-zen linux-zen-headers linux-firmware grub efibootmgr networkmanager nano sudo \
+    sddm uwsm hyprland kitty rofi-wayland mesa pipewire pipewire-audio wireplumber \
+    arch-install-scripts xorg-xwayland firefox foot nautilus polkit-gnome \
+    xdg-desktop-portal xdg-desktop-portal-hyprland vlc vlc-plugins-all nautilus 
+
+echo "==> Generating filesystem fstab..."
+genfstab -U /mnt >> /mnt/etc/fstab
+
+# --- INTERNAL SYSTEM PROVISIONING (CHROOT) ---
+echo "==> Entering chroot environment for internal personalization..."
+if ! mountpoint -q /mnt || [[ ! -x /mnt/bin/bash || ! -d /mnt/etc ]]; then
+    echo "❌ Error: /mnt is not a mounted, bootstrapped target system; refusing to configure it." >&2
+    exit 1
+fi
+
+# Pass configuration over stdin rather than embedding another shell heredoc.
+# This avoids delimiter/paste errors and keeps passwords out of process args.
+printf '%s\n' "$KEYMAP" "$TIMEZONE" "$HOSTNAME" "$NEW_USER" "$USER_PASS" "$ROOT_PASS" |
+    arch-chroot /mnt /bin/bash -c '
+        set -Eeuo pipefail
+        IFS= read -r KEYMAP
+        IFS= read -r TIMEZONE
+        IFS= read -r HOSTNAME
+        IFS= read -r NEW_USER
+        IFS= read -r USER_PASS
+        IFS= read -r ROOT_PASS
+
+        # Setup localization and clocks
+        echo "LANG=en_US.UTF-8" > /etc/locale.gen
+        echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+        ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
+        hwclock --systohc
+
+        # Loopback system network definitions
+        echo "$HOSTNAME" > /etc/hostname
+        printf "127.0.0.1   localhost\n::1         localhost\n127.0.1.1   %s.localdomain %s\n" \
+            "$HOSTNAME" "$HOSTNAME" > /etc/hosts
+
+        # Activate background system utilities
+        systemctl enable NetworkManager
+        systemctl enable sddm
+
+        # Create standard user
+        useradd -m -G wheel -s /bin/bash "$NEW_USER"
+
+        # Assign passwords
+        printf "root:%s\n%s:%s\n" "$ROOT_PASS" "$NEW_USER" "$USER_PASS" | chpasswd
+
+        # Grant wheel permission configurations
+        echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-installer-wheel
+
+        # Compile UEFI GRUB Bootloader
+        grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --removable
+        grub-mkconfig -o /boot/grub/grub.cfg
+    '
+
+echo "==> Safely unmounting storage arrays..."
+cd /
+sync
+if command -v fuser >/dev/null 2>&1; then
+    MOUNT_PIDS=$(fuser -m /mnt 2>/dev/null || true)
+    for pid in $MOUNT_PIDS; do
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        [[ -r "/proc/$pid/comm" ]] || continue
+        IFS= read -r process_name < "/proc/$pid/comm" || continue
+        if [[ "$process_name" == gpg-agent ]]; then
+            echo "==> Stopping gpg-agent (PID $pid) holding the target filesystem..."
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
+    sleep 1
+fi
+if ! umount -R /mnt; then
+    echo "❌ Error: Could not unmount /mnt. The installed system is configured, but a process or mount is still using it." >&2
+    findmnt -R /mnt >&2 || true
+    if command -v fuser >/dev/null 2>&1; then
+        fuser -vm /mnt >&2 || true
+    else
+        echo "   'fuser' is unavailable; inspect processes using /mnt before retrying." >&2
+    fi
+    exit 1
+fi
+
+echo "======================================================================"
+echo " 🎉 SUCCESS! Strict offline system installation complete."
+echo " Power down the device, extract your live USB, and reboot."
+echo "======================================================================"

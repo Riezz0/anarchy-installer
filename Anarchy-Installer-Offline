@@ -9,7 +9,7 @@ if (( EUID != 0 )); then
     exit 1
 fi
 
-for command in lsblk grep sgdisk mkfs.vfat mkfs.ext4 mount mountpoint pacstrap genfstab arch-chroot; do
+for command in lsblk grep sgdisk mkfs.vfat mkfs.btrfs btrfs mount umount mountpoint pacstrap genfstab arch-chroot; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "❌ Error: Required command '$command' is missing from the live environment." >&2
         exit 1
@@ -17,11 +17,27 @@ for command in lsblk grep sgdisk mkfs.vfat mkfs.ext4 mount mountpoint pacstrap g
 done
 
 LOCAL_REPO_DIR="/opt/arch-offline-repo"
+DOTFILES_SOURCE_DIR="/opt/dotfiles"
 
 if [ ! -d "$LOCAL_REPO_DIR" ] || [ ! -f "$LOCAL_REPO_DIR/offline_repo.db" ]; then
     echo "❌ Error: Built-in repository or database index not found at $LOCAL_REPO_DIR"
     exit 1
 fi
+
+if [[ ! -d "$DOTFILES_SOURCE_DIR" ]]; then
+    echo "❌ Error: Dotfiles bundle not found at $DOTFILES_SOURCE_DIR; refusing to partition the disk." >&2
+    exit 1
+fi
+for required_path in \
+    sys/grub/grub sys/grub/tokyo-night sys/sddm/anarchy-sddm \
+    sys/sddm/sddm.conf sys/sddm/initial-setup sys/fonts \
+    scripts bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
+    kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh; do
+    if [[ ! -e "$DOTFILES_SOURCE_DIR/$required_path" ]]; then
+        echo "❌ Error: Required dotfiles path is missing: $DOTFILES_SOURCE_DIR/$required_path" >&2
+        exit 1
+    fi
+done
 
 # --- DYNAMIC DRIVE SELECTION ---
 echo "=================================================="
@@ -119,8 +135,25 @@ while true; do
 done
 echo "=================================================="
 
+echo "AUR helpers and Chaotic-AUR require Internet access during installation."
+while true; do
+    read -rp "Choose an AUR helper (yay/paru/pikaur/none) [none]: " AUR_HELPER
+    AUR_HELPER=${AUR_HELPER:-none}
+    case "$AUR_HELPER" in
+        yay|paru|pikaur|none) break ;;
+        *) echo "❌ Choose yay, paru, pikaur, or none." ;;
+    esac
+done
+
+INSTALL_CHAOTIC_AUR=false
+read -rp "Install the Chaotic-AUR repository? (y/N): " CHAOTIC_ANSWER
+[[ "$CHAOTIC_ANSWER" =~ ^[Yy]$ ]] && INSTALL_CHAOTIC_AUR=true
+
 echo ""
 echo "⚠️  CRITICAL WARNING: This process will completely wipe $DISK."
+if [[ "$AUR_HELPER" != none || "$INSTALL_CHAOTIC_AUR" == true ]]; then
+    echo "⚠️  The selected AUR option also requires a working Internet connection."
+fi
 read -rp "Are you absolutely certain you want to proceed? (y/N): " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo "Installation aborted by user."
@@ -137,11 +170,22 @@ sleep 2
 
 echo "==> Formatting filesystems..."
 mkfs.vfat -F 32 "$EFI_PART"
-mkfs.ext4 -F "$ROOT_PART"
+mkfs.btrfs -f "$ROOT_PART"
 
-echo "==> Mounting system filesystems..."
+echo "==> Creating Btrfs subvolumes..."
 mount "$ROOT_PART" /mnt
-mkdir -p /mnt/boot/efi
+for subvolume in @ @home @log @pkg @.snapshots; do
+    btrfs subvolume create "/mnt/$subvolume"
+done
+umount /mnt
+
+echo "==> Mounting target subvolumes..."
+mount -o noatime,compress=zstd,subvol=@ "$ROOT_PART" /mnt
+mkdir -p /mnt/{home,var/log,var/cache/pacman/pkg,.snapshots,boot/efi}
+mount -o noatime,compress=zstd,subvol=@home "$ROOT_PART" /mnt/home
+mount -o noatime,compress=zstd,subvol=@log "$ROOT_PART" /mnt/var/log
+mount -o noatime,compress=zstd,subvol=@pkg "$ROOT_PART" /mnt/var/cache/pacman/pkg
+mount -o noatime,compress=zstd,subvol=@.snapshots "$ROOT_PART" /mnt/.snapshots
 mount "$EFI_PART" /mnt/boot/efi
 
 # --- CONFIGURE PACMAN FOR ISOLATION ---
@@ -160,13 +204,17 @@ EOF
 # --- PACSTRAP SEQUENCE ---
 echo "==> Executing pure offline pacstrap deployment..."
 pacstrap -C /tmp/pacman-offline.conf -K /mnt \
-    base linux-zen linux-zen-headers linux-firmware grub efibootmgr networkmanager nano sudo \
-    sddm uwsm hyprland kitty rofi-wayland mesa pipewire pipewire-audio wireplumber \
-    arch-install-scripts xorg-xwayland firefox foot nautilus polkit-gnome \
+    base linux-zen linux-zen-headers linux-firmware linux-firmware-amdgpu btrfs-progs grub efibootmgr networkmanager nano sudo \
+    sddm uwsm hyprland kitty rofi-wayland mesa pipewire pipewire-audio wireplumber stow zsh \
+    vulkan-radeon lib32-mesa lib32-vulkan-radeon \
+    arch-install-scripts git xorg-xwayland firefox foot nautilus polkit-gnome \
     xdg-desktop-portal xdg-desktop-portal-hyprland vlc vlc-plugins-all nautilus 
 
 echo "==> Generating filesystem fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
+ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
+mkdir -p /mnt/opt/dotfiles
+mount --bind "$DOTFILES_SOURCE_DIR" /mnt/opt/dotfiles
 
 # --- INTERNAL SYSTEM PROVISIONING (CHROOT) ---
 echo "==> Entering chroot environment for internal personalization..."
@@ -175,17 +223,34 @@ if ! mountpoint -q /mnt || [[ ! -x /mnt/bin/bash || ! -d /mnt/etc ]]; then
     exit 1
 fi
 
-# Pass configuration over stdin rather than embedding another shell heredoc.
-# This avoids delimiter/paste errors and keeps passwords out of process args.
-printf '%s\n' "$KEYMAP" "$TIMEZONE" "$HOSTNAME" "$NEW_USER" "$USER_PASS" "$ROOT_PASS" |
-    arch-chroot /mnt /bin/bash -c '
-        set -Eeuo pipefail
-        IFS= read -r KEYMAP
-        IFS= read -r TIMEZONE
-        IFS= read -r HOSTNAME
-        IFS= read -r NEW_USER
-        IFS= read -r USER_PASS
-        IFS= read -r ROOT_PASS
+# Keep secrets in a root-only file and run a standalone script inside the
+# chroot so nested quotes and heredocs are parsed by the target Bash.
+CHROOT_SCRIPT=/mnt/root/anarchy-offline-setup.sh
+CHROOT_VALUES=/mnt/root/.anarchy-offline-setup-values
+cleanup_chroot_payload() {
+    if mountpoint -q /mnt; then
+        rm -f "$CHROOT_SCRIPT" "$CHROOT_VALUES"
+    fi
+}
+trap cleanup_chroot_payload EXIT
+printf '%s\n' "$KEYMAP" "$TIMEZONE" "$HOSTNAME" "$NEW_USER" "$USER_PASS" \
+    "$ROOT_PASS" "$ROOT_UUID" "$AUR_HELPER" "$INSTALL_CHAOTIC_AUR" > "$CHROOT_VALUES"
+chmod 600 "$CHROOT_VALUES"
+cat > "$CHROOT_SCRIPT" <<'CHROOT_SCRIPT_EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+mapfile -t install_values < /root/.anarchy-offline-setup-values
+(( ${#install_values[@]} == 9 )) || { echo 'Invalid installer configuration values.' >&2; exit 1; }
+KEYMAP=${install_values[0]}
+TIMEZONE=${install_values[1]}
+HOSTNAME=${install_values[2]}
+NEW_USER=${install_values[3]}
+USER_PASS=${install_values[4]}
+ROOT_PASS=${install_values[5]}
+ROOT_UUID=${install_values[6]}
+AUR_HELPER=${install_values[7]}
+INSTALL_CHAOTIC_AUR=${install_values[8]}
+DOTFILES_DIR="/home/$NEW_USER/anarchydots"
 
         # Setup localization and clocks
         echo "LANG=en_US.UTF-8" > /etc/locale.gen
@@ -203,22 +268,121 @@ printf '%s\n' "$KEYMAP" "$TIMEZONE" "$HOSTNAME" "$NEW_USER" "$USER_PASS" "$ROOT_
         systemctl enable sddm
 
         # Create standard user
-        useradd -m -G wheel -s /bin/bash "$NEW_USER"
+        useradd -m -U -G wheel -s /bin/bash "$NEW_USER"
 
         # Assign passwords
         printf "root:%s\n%s:%s\n" "$ROOT_PASS" "$NEW_USER" "$USER_PASS" | chpasswd
 
         # Grant wheel permission configurations
         echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/10-installer-wheel
+        chmod 0440 /etc/sudoers.d/10-installer-wheel
 
-        # Compile UEFI GRUB Bootloader
+        # Copy the locally bundled dotfiles and stow the desktop configuration.
+        mkdir -p "$DOTFILES_DIR"
+        cp -a /opt/dotfiles/. "$DOTFILES_DIR/"
+        chown -R "$NEW_USER:$NEW_USER" "$DOTFILES_DIR"
+        rm -rf "$DOTFILES_DIR/nct6687d" "$DOTFILES_DIR/.config" "$DOTFILES_DIR/.local" \
+            "$DOTFILES_DIR/.cache" "$DOTFILES_DIR/.oh-my-zsh"
+        stow --restow --dir="$DOTFILES_DIR" --target=/usr/local scripts
+        runuser -u "$NEW_USER" -- stow --restow --dir="$DOTFILES_DIR" \
+            --target="/home/$NEW_USER" \
+            bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
+            kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh
+        install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/fonts"
+        cp -a "$DOTFILES_DIR/sys/fonts/." "/home/$NEW_USER/.local/share/fonts/"
+        chsh -s /bin/zsh "$NEW_USER"
+
+        # Install SDDM theme and wallpaper assets from the cloned dotfiles.
+        mkdir -p /usr/share/sddm/themes
+        cp -r "$DOTFILES_DIR/sys/sddm/anarchy-sddm" /usr/share/sddm/themes/
+        cp "$DOTFILES_DIR/sys/sddm/sddm.conf" /etc/sddm.conf
+        sed -i 's/^Session=hyprland-uswm$/Session=hyprland-uwsm.desktop/' /etc/sddm.conf
+        mkdir -p /var/local/sddm-wallpaper
+        cp -r "$DOTFILES_DIR/sys/sddm/initial-setup/." /var/local/sddm-wallpaper/
+        chown -R "$NEW_USER:sddm" /var/local/sddm-wallpaper
+        chmod -R u+rwX,g+rwX,o+rX /var/local/sddm-wallpaper
+
+        # Initialize Arch keys before any optional online package operations.
+        pacman-key --init
+        pacman-key --populate archlinux
+
+        # Ensure the installed system has the official core, extra, and multilib repos.
+        awk '
+            /^\[/ { skip = ($0 == "[core]" || $0 == "[extra]" || $0 == "[multilib]") }
+            !skip { print }
+        ' /etc/pacman.conf > /etc/pacman.conf.anarchy
+        cat >> /etc/pacman.conf.anarchy <<'PACMAN_REPOSITORIES'
+
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+PACMAN_REPOSITORIES
+        mv /etc/pacman.conf.anarchy /etc/pacman.conf
+
+        # Optionally enable Chaotic-AUR using its signed keyring and mirrorlist.
+        if [[ "$INSTALL_CHAOTIC_AUR" == true ]]; then
+            pacman-key --recv-key 3056513887B78AEB --keyserver keyserver.ubuntu.com
+            pacman-key --lsign-key 3056513887B78AEB
+            pacman -U --noconfirm \
+                https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst \
+                https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst
+            if ! grep -q '^\[chaotic-aur\]' /etc/pacman.conf; then
+                printf '\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist\n' >> /etc/pacman.conf
+            fi
+        fi
+
+        # AUR helper builds and Chaotic-AUR both need current online package metadata.
+        if [[ "$AUR_HELPER" != none || "$INSTALL_CHAOTIC_AUR" == true ]]; then
+            pacman -Syu --noconfirm
+        fi
+
+        if [[ "$AUR_HELPER" != none ]]; then
+            pacman -S --needed --noconfirm base-devel git
+            AUR_BUILD_DIR="/tmp/aur-helper-$AUR_HELPER"
+            rm -rf "$AUR_BUILD_DIR"
+            runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" bash -c '
+                set -Eeuo pipefail
+                git clone --depth 1 "https://aur.archlinux.org/$1.git" "$2"
+                cd "$2"
+                makepkg --syncdeps --install --noconfirm
+            ' _ "$AUR_HELPER" "$AUR_BUILD_DIR"
+            rm -rf "$AUR_BUILD_DIR"
+        fi
+
+        # Build an initramfs with Btrfs support for the root filesystem.
+        rm -rf /etc/mkinitcpio.conf.d
+        cat > /etc/mkinitcpio.conf <<'MKINIT'
+MODULES=(btrfs amdgpu)
+BINARIES=()
+FILES=()
+HOOKS=(base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck)
+MKINIT
+        mkinitcpio -P
+
+        # Install the GRUB theme and configure the Btrfs root subvolume.
+        mkdir -p /usr/share/grub/themes
+        cp "$DOTFILES_DIR/sys/grub/grub" /etc/default/grub
+        cp -r "$DOTFILES_DIR/sys/grub/tokyo-night" /usr/share/grub/themes/
+        sed -i "s|^GRUB_TOP_LEVEL=.*|GRUB_TOP_LEVEL='/boot/vmlinuz-linux-zen'|; s|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT=\"root=UUID=$ROOT_UUID rootflags=subvol=@ rw\"|" /etc/default/grub
+
+        # Compile the UEFI GRUB bootloader.
         grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --removable
         grub-mkconfig -o /boot/grub/grub.cfg
-    '
+CHROOT_SCRIPT_EOF
+chmod 700 "$CHROOT_SCRIPT"
+arch-chroot /mnt /bin/bash /root/anarchy-offline-setup.sh
+rm -f "$CHROOT_SCRIPT" "$CHROOT_VALUES"
 
 echo "==> Safely unmounting storage arrays..."
 cd /
 sync
+umount /mnt/opt/dotfiles
+rmdir /mnt/opt/dotfiles
 if command -v fuser >/dev/null 2>&1; then
     MOUNT_PIDS=$(fuser -m /mnt 2>/dev/null || true)
     for pid in $MOUNT_PIDS; do
