@@ -135,7 +135,29 @@ while true; do
 done
 echo "=================================================="
 
-echo "The AUR helpers will be installed from the offline repository."
+while true; do
+    read -rp "Choose an AUR helper to install (yay/paru/pikaur): " AUR_HELPER
+    case "$AUR_HELPER" in
+        yay) AUR_HELPER_PACKAGE=yay; break ;;
+        paru) AUR_HELPER_PACKAGE=paru; break ;;
+        pikaur) AUR_HELPER_PACKAGE=pikaur-git; break ;;
+        *) echo "❌ Choose yay, paru, or pikaur." ;;
+    esac
+done
+
+INSTALL_NCT6687D=false
+if [[ -d "$DOTFILES_SOURCE_DIR/nct6687d" ]]; then
+    INSTALL_NCT6687D=true
+    echo "NCT6687D source is bundled; the DKMS driver will be installed."
+else
+    read -rp "Install the NCT6687D DKMS driver from GitHub? (requires Internet) (y/N): " NCT_ANSWER
+    [[ "$NCT_ANSWER" =~ ^[Yy]$ ]] && INSTALL_NCT6687D=true
+fi
+NCT_BUILD_PACKAGES=()
+if [[ "$INSTALL_NCT6687D" == true ]]; then
+    NCT_BUILD_PACKAGES=(dkms base-devel)
+fi
+
 echo "Chaotic-AUR setup requires Internet access during installation."
 INSTALL_CHAOTIC_AUR=false
 read -rp "Install the Chaotic-AUR repository? (y/N): " CHAOTIC_ANSWER
@@ -145,6 +167,9 @@ echo ""
 echo "⚠️  CRITICAL WARNING: This process will completely wipe $DISK."
 if [[ "$INSTALL_CHAOTIC_AUR" == true ]]; then
     echo "⚠️  Chaotic-AUR setup requires a working Internet connection."
+fi
+if [[ "$INSTALL_NCT6687D" == true && ! -d "$DOTFILES_SOURCE_DIR/nct6687d" ]]; then
+    echo "⚠️  The NCT6687D source will be cloned from GitHub and requires Internet."
 fi
 read -rp "Are you absolutely certain you want to proceed? (y/N): " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
@@ -198,6 +223,7 @@ EOF
 echo "==> Executing pure offline pacstrap deployment..."
 pacstrap -C /tmp/pacman-offline.conf -K /mnt \
     base linux-zen linux-zen-headers linux-firmware linux-firmware-amdgpu btrfs-progs grub efibootmgr networkmanager nano sudo git \
+    "${NCT_BUILD_PACKAGES[@]}" \
     sddm uwsm hyprland kitty rofi mesa pipewire pipewire-audio wireplumber stow zsh \
     vulkan-radeon lib32-mesa lib32-vulkan-radeon \
     terminus-font gptfdisk e2fsprogs dosfstools adw-gtk-theme otf-font-awesome wlsunset \
@@ -212,8 +238,8 @@ pacstrap -C /tmp/pacman-offline.conf -K /mnt \
     python-libsass python-material-color-utilities python-pywal16 python-pywalfox python-yapsy-git \
     qt5-styleplugins slurp-git vesktop-bin ttf-font-awesome-4 ttf-font-awesome-5 vkbasalt \
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
-    pikaur-git yay paru arch-install-scripts xorg-xwayland firefox foot polkit-gnome \
-    xdg-desktop-portal xdg-desktop-portal-hyprland make
+    arch-install-scripts xorg-xwayland firefox foot polkit-gnome \
+    xdg-desktop-portal xdg-desktop-portal-hyprland "$AUR_HELPER_PACKAGE"
 
 echo "==> Generating filesystem fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -239,13 +265,32 @@ cleanup_chroot_payload() {
 }
 trap cleanup_chroot_payload EXIT
 printf '%s\n' "$KEYMAP" "$TIMEZONE" "$HOSTNAME" "$NEW_USER" "$USER_PASS" \
-    "$ROOT_PASS" "$ROOT_UUID" "$INSTALL_CHAOTIC_AUR" > "$CHROOT_VALUES"
+    "$ROOT_PASS" "$ROOT_UUID" "$INSTALL_CHAOTIC_AUR" "$INSTALL_NCT6687D" > "$CHROOT_VALUES"
 chmod 600 "$CHROOT_VALUES"
 cat > "$CHROOT_SCRIPT" <<'CHROOT_SCRIPT_EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
+make_scripts_executable() {
+    local root="$1" file prefix
+    while IFS= read -r -d '' file; do
+        case "$file" in
+            *.sh|*.bash|*.zsh|*.py|*.pl|*.rb|*.lua|*.fish)
+                chmod a+x "$file"
+                ;;
+            *)
+                prefix=''
+                IFS= read -r -N 2 prefix < "$file" 2>/dev/null || true
+                if [[ "$prefix" == '#!' ]]; then
+                    chmod a+x "$file"
+                fi
+                ;;
+        esac
+    done < <(find "$root" -type f -print0)
+}
+
 mapfile -t install_values < /root/.anarchy-offline-setup-values
-(( ${#install_values[@]} == 8 )) || { echo 'Invalid installer configuration values.' >&2; exit 1; }
+(( ${#install_values[@]} == 9 )) || { echo 'Invalid installer configuration values.' >&2; exit 1; }
 KEYMAP=${install_values[0]}
 TIMEZONE=${install_values[1]}
 HOSTNAME=${install_values[2]}
@@ -254,6 +299,7 @@ USER_PASS=${install_values[4]}
 ROOT_PASS=${install_values[5]}
 ROOT_UUID=${install_values[6]}
 INSTALL_CHAOTIC_AUR=${install_values[7]}
+INSTALL_NCT6687D=${install_values[8]}
 DOTFILES_DIR="/home/$NEW_USER/anarchydots"
 
         # Setup localization and clocks
@@ -288,11 +334,14 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         chown -R "$NEW_USER:$NEW_USER" "$DOTFILES_DIR"
         rm -rf "$DOTFILES_DIR/nct6687d" "$DOTFILES_DIR/.config" "$DOTFILES_DIR/.local" \
             "$DOTFILES_DIR/.cache" "$DOTFILES_DIR/.oh-my-zsh"
+        make_scripts_executable "$DOTFILES_DIR"
+        mkdir -p /usr/local/bin
         stow --restow --dir="$DOTFILES_DIR" --target=/usr/local scripts
         runuser -u "$NEW_USER" -- stow --restow --dir="$DOTFILES_DIR" \
             --target="/home/$NEW_USER" \
             bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
             kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh
+        find -L /usr/local/bin -maxdepth 1 -type f -exec chmod a+x {} +
         install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/themes"
         install -o "$NEW_USER" -g "$NEW_USER" -m 0755 \
             "/home/$NEW_USER/.config/.hypr-themes/tokyo-night/tokyo-night.sh" \
@@ -300,6 +349,21 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/fonts"
         cp -a "$DOTFILES_DIR/sys/fonts/." "/home/$NEW_USER/.local/share/fonts/"
         chsh -s /bin/zsh "$NEW_USER"
+
+        # Apply the Nautilus terminal integration preferences for the new user.
+        if command -v gsettings >/dev/null 2>&1 && \
+           command -v dbus-run-session >/dev/null 2>&1 && \
+           gsettings list-schemas | grep -qx com.github.stunkymonkey.nautilus-open-any-terminal; then
+            runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" dbus-run-session -- \
+                gsettings set com.github.stunkymonkey.nautilus-open-any-terminal terminal kitty
+            runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" dbus-run-session -- \
+                gsettings set com.github.stunkymonkey.nautilus-open-any-terminal keybindings '<Ctrl><Alt>t'
+            runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" dbus-run-session -- \
+                gsettings set com.github.stunkymonkey.nautilus-open-any-terminal new-tab true
+            runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" dbus-run-session -- \
+                gsettings set com.github.stunkymonkey.nautilus-open-any-terminal flatpak system
+            runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" nautilus -q >/dev/null 2>&1 || true
+        fi
 
         # Let the user's cursor-theme helper update the system default theme.
         mkdir -p /usr/share/icons/default
@@ -361,7 +425,36 @@ if [[ "$INSTALL_CHAOTIC_AUR" == true ]]; then
     pacman -Syu --noconfirm
 fi
 
-        # Build an initramfs with Btrfs support for the root filesystem.
+if [[ "$INSTALL_NCT6687D" == true ]]; then
+    echo "Installing the NCT6687D DKMS driver for the installed linux-zen kernel..."
+    NCT_DRIVER_DIR="/home/$NEW_USER/tmp/nct6687d"
+    install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/tmp"
+    mkdir -p "$NCT_DRIVER_DIR"
+    if [[ -d /opt/dotfiles/nct6687d ]]; then
+        cp -a /opt/dotfiles/nct6687d/. "$NCT_DRIVER_DIR/"
+    else
+        runuser -u "$NEW_USER" -- git clone --depth 1 \
+            https://github.com/Fred78290/nct6687d "$NCT_DRIVER_DIR"
+    fi
+
+    mkdir -p "$NCT_DRIVER_DIR/dkms"
+    cp "$NCT_DRIVER_DIR/dkms.conf" "$NCT_DRIVER_DIR/Kbuild" \
+        "$NCT_DRIVER_DIR/Makefile" "$NCT_DRIVER_DIR/nct6687.c" "$NCT_DRIVER_DIR/dkms/"
+    dkms add "$NCT_DRIVER_DIR/dkms"
+    NCT_KERNEL_COUNT=0
+    for kernel_dir in /usr/lib/modules/*; do
+        [[ -e "$kernel_dir/build" ]] || continue
+        dkms install nct6687d/1 -k "${kernel_dir##*/}"
+        NCT_KERNEL_COUNT=$((NCT_KERNEL_COUNT + 1))
+    done
+    (( NCT_KERNEL_COUNT > 0 )) || { echo 'No target kernel headers found for NCT6687D DKMS.' >&2; exit 1; }
+    install -D -m 0644 "$DOTFILES_DIR/sys/no_nct6683.conf" /etc/modprobe.d/no_nct6683.conf
+    install -D -m 0644 "$DOTFILES_DIR/sys/nct6687.conf" /etc/modules-load.d/nct6687.conf
+    chown -R "$NEW_USER:$NEW_USER" "$NCT_DRIVER_DIR"
+    echo "NCT6687D is installed and configured to load on the next boot."
+fi
+
+# Build an initramfs with Btrfs support for the root filesystem.
         rm -rf /etc/mkinitcpio.conf.d
         cat > /etc/mkinitcpio.conf <<'MKINIT'
 MODULES=(btrfs amdgpu)
