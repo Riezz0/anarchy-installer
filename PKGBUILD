@@ -6,7 +6,7 @@ arch=('any')
 license=('GPL-3.0-or-later')
 options=('!debug')
 depends=('bash' 'gum' 'figlet' 'python' 'python-gobject' 'libadwaita')
-source=('Anarchy-Launcher' 'Anarchy-Installer' 'Anarchy-Installer-Offline')
+source=('Anarchy-Launcher' 'Anarchy-Installer' 'Anarchy-Installer-Offline' 'Anarchy-Installer-Offline.bak')
 sha256sums=('SKIP' 'SKIP' 'SKIP')
 
 pkgver() {
@@ -20,4 +20,6 @@ package() {
         "$pkgdir/usr/local/bin/Anarchy-Installer"
     install -Dm755 "$srcdir/Anarchy-Installer-Offline" \
         "$pkgdir/usr/local/bin/Anarchy-Installer-Offline"
+      install -Dm755 "$srcdir/Anarchy-Installer-Offline.bak" \
+        "$pkgdir/usr/local/bin/Anarchy-Installer-Offline.bak"
 }
