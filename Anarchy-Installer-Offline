@@ -311,7 +311,7 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
 
         # Ensure the installed system has the official core, extra, and multilib repos.
         awk '
-            /^\[/ { skip = ($0 == "[core]" || $0 == "[extra]" || $0 == "[multilib]") }
+            /^\[/ { skip = ($0 == "[core]" || $0 == "[extra]" || $0 == "[multilib]" || $0 == "[offline_repo]") }
             !skip { print }
         ' /etc/pacman.conf > /etc/pacman.conf.anarchy
         cat >> /etc/pacman.conf.anarchy <<'PACMAN_REPOSITORIES'
