@@ -213,7 +213,7 @@ pacstrap -C /tmp/pacman-offline.conf -K /mnt \
     qt5-styleplugins slurp-git vesktop-bin ttf-font-awesome-4 ttf-font-awesome-5 vkbasalt \
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
     pikaur-git yay paru arch-install-scripts xorg-xwayland firefox foot polkit-gnome \
-    xdg-desktop-portal xdg-desktop-portal-hyprland
+    xdg-desktop-portal xdg-desktop-portal-hyprland make
 
 echo "==> Generating filesystem fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
@@ -270,6 +270,7 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         # Activate background system utilities
         systemctl enable NetworkManager
         systemctl enable sddm
+        systemctl enable coolercontrold.service
 
         # Create standard user
         useradd -m -U -G wheel -s /bin/bash "$NEW_USER"
@@ -292,9 +293,24 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
             --target="/home/$NEW_USER" \
             bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
             kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh
+        install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/themes"
+        install -o "$NEW_USER" -g "$NEW_USER" -m 0755 \
+            "/home/$NEW_USER/.config/.hypr-themes/tokyo-night/tokyo-night.sh" \
+            "/home/$NEW_USER/.local/share/themes/hypr-theme-active.sh"
         install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/fonts"
         cp -a "$DOTFILES_DIR/sys/fonts/." "/home/$NEW_USER/.local/share/fonts/"
         chsh -s /bin/zsh "$NEW_USER"
+
+        # Let the user's cursor-theme helper update the system default theme.
+        mkdir -p /usr/share/icons/default
+        chown -R "$NEW_USER:$NEW_USER" /usr/share/icons/default
+        chmod -R u+rwX,g+rwX,o+rX /usr/share/icons/default
+
+        # Make all Stow-managed system scripts executable.
+        shopt -s nullglob
+        for script in /usr/local/bin/*; do
+            [[ -f "$script" ]] && chmod a+x "$script"
+        done
 
         # Install SDDM theme and wallpaper assets from the cloned dotfiles.
         mkdir -p /usr/share/sddm/themes
@@ -401,4 +417,5 @@ fi
 echo "======================================================================"
 echo " 🎉 SUCCESS! Strict offline system installation complete."
 echo " Power down the device, extract your live USB, and reboot."
+echo "After boot, check CoolerControl with: systemctl status coolercontrold"
 echo "======================================================================"
