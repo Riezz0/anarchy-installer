@@ -92,7 +92,7 @@ fi
 for required_path in \
     sys/grub/grub sys/grub/tokyo-night sys/sddm/anarchy-sddm \
     sys/sddm/sddm.conf sys/sddm/initial-setup sys/fonts \
-    scripts bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
+    scripts bg cursors cursors/.local/share/icons fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
     kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh; do
     if [[ ! -e "$DOTFILES_SOURCE_DIR/$required_path" ]]; then
         fail "Required dotfiles path is missing: $DOTFILES_SOURCE_DIR/$required_path"
@@ -284,7 +284,8 @@ if ! gum spin --spinner dot --show-error \
     qt5-styleplugins slurp-git vesktop-bin ttf-font-awesome-4 ttf-font-awesome-5 vkbasalt \
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
     arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa \
-    xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet "$AUR_HELPER_PACKAGE"; then
+    xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet qt5ct qt6ct \
+    gcc chromium "$AUR_HELPER_PACKAGE"; then
     fail 'Offline package installation failed. See the output above.'
     exit 1
 fi
@@ -410,6 +411,10 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
             runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" nautilus -q >/dev/null 2>&1 || true
         fi
 
+        # Install every bundled cursor theme system-wide for SDDM and other
+        # users: cp -r ~/anarchydots/cursors/.local/share/icons/* /usr/share/icons/
+        cp -r "$DOTFILES_DIR/cursors/.local/share/icons/." /usr/share/icons/
+
         # Let the user's cursor-theme helper update the system default theme.
         mkdir -p /usr/share/icons/default
         chown -R "$NEW_USER:$NEW_USER" /usr/share/icons/default
@@ -426,6 +431,10 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         cp -r "$DOTFILES_DIR/sys/sddm/anarchy-sddm" /usr/share/sddm/themes/
         cp "$DOTFILES_DIR/sys/sddm/sddm.conf" /etc/sddm.conf
         sed -i 's/^Session=hyprland-uswm$/Session=hyprland-uwsm.desktop/' /etc/sddm.conf
+        # Same permissions as the SDDM wallpaper assets in /var/local: owned by
+        # the new user in the sddm group and writable by them.
+        chown "$NEW_USER:sddm" /etc/sddm.conf
+        chmod u+rwX,g+rwX,o+rX /etc/sddm.conf
         mkdir -p /var/local/sddm-wallpaper
         cp -r "$DOTFILES_DIR/sys/sddm/initial-setup/." /var/local/sddm-wallpaper/
         chown -R "$NEW_USER:sddm" /var/local/sddm-wallpaper
@@ -539,6 +548,36 @@ fi
 ok 'Installed system configured'
 rm -f "$CHROOT_SCRIPT" "$CHROOT_VALUES"
 CHROOT_SCRIPT=''; CHROOT_VALUES=''
+
+# The installed system's pacman.conf lists core/extra/multilib, but an offline
+# install never downloads their sync databases. Seed them from the databases
+# bundled in the offline repository so first boot does not warn "database file
+# for 'core' does not exist (use '-Sy' to download)".
+step 'Seeding official package databases for first boot'
+mkdir -p /mnt/var/lib/pacman/sync
+missing_sync_dbs=0
+seeded_sync_dbs=0
+for sync_db in core extra multilib; do
+    if [[ -f "/mnt/var/lib/pacman/sync/$sync_db.db" ]]; then
+        continue
+    fi
+    missing_sync_dbs=$((missing_sync_dbs + 1))
+    if [[ -f "$LOCAL_REPO_DIR/$sync_db.db" ]]; then
+        cp -f "$LOCAL_REPO_DIR/$sync_db.db" /mnt/var/lib/pacman/sync/
+        seeded_sync_dbs=$((seeded_sync_dbs + 1))
+    fi
+done
+# The offline repository is stripped from the target's pacman.conf, so its
+# database file is unused there.
+rm -f /mnt/var/lib/pacman/sync/offline_repo.db
+if (( missing_sync_dbs == 0 )); then
+    ok 'Official sync databases already present'
+elif (( seeded_sync_dbs == missing_sync_dbs )); then
+    ok 'Seeded core, extra and multilib databases for first boot'
+else
+    gum style --foreground "$YELLOW" \
+        "Only $seeded_sync_dbs of $missing_sync_dbs official sync databases were bundled; run 'pacman -Sy' after first boot."
+fi
 
 step 'Unmounting target filesystems'
 if ! unmount_target; then
