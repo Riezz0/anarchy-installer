@@ -9,7 +9,7 @@ if (( EUID != 0 )); then
     exit 1
 fi
 
-for command in lsblk grep sgdisk mkfs.vfat mkfs.btrfs btrfs mount umount mountpoint pacstrap genfstab arch-chroot; do
+for command in lsblk grep sgdisk mkfs.vfat mkfs.btrfs btrfs modprobe mount umount mountpoint pacstrap genfstab arch-chroot; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "❌ Error: Required command '$command' is missing from the live environment." >&2
         exit 1
@@ -162,9 +162,10 @@ sleep 2
 
 echo "==> Formatting filesystems..."
 mkfs.vfat -F 32 "$EFI_PART"
-mkfs.btrfs -f "$ROOT_PART"
+mkfs.btrfs -f -O '^block-group-tree' "$ROOT_PART"
 
 echo "==> Creating Btrfs subvolumes..."
+modprobe btrfs
 mount "$ROOT_PART" /mnt
 for subvolume in @ @home @log @pkg @.snapshots; do
     btrfs subvolume create "/mnt/$subvolume"
