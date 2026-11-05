@@ -383,6 +383,7 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         make_scripts_executable "$DOTFILES_DIR"
         mkdir -p /usr/local/bin
         stow --restow --dir="$DOTFILES_DIR" --target=/usr/local scripts
+        sudo stow -t / coolercontrol
         runuser -u "$NEW_USER" -- stow --restow --dir="$DOTFILES_DIR" \
             --target="/home/$NEW_USER" \
             bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
