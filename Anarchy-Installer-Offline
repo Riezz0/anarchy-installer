@@ -127,7 +127,7 @@ fi
 for required_path in \
     sys/grub/grub sys/grub/tokyo-night sys/sddm/anarchy-sddm \
     sys/sddm/sddm.conf sys/sddm/initial-setup sys/fonts \
-    scripts bg cursors cursors/.local/share/icons fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
+    scripts bg coolercontrol/etc/coolercontrol/config.toml cursors cursors/.local/share/icons fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
     kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh; do
     if [[ ! -e "$DOTFILES_SOURCE_DIR/$required_path" ]]; then
         fail "Required dotfiles path is missing: $DOTFILES_SOURCE_DIR/$required_path"
@@ -429,7 +429,7 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         make_scripts_executable "$DOTFILES_DIR"
         mkdir -p /usr/local/bin
         stow --restow --dir="$DOTFILES_DIR" --target=/usr/local scripts
-        sudo stow -t / coolercontrol
+        stow --restow --dir="$DOTFILES_DIR" --target=/ coolercontrol
         runuser -u "$NEW_USER" -- stow --restow --dir="$DOTFILES_DIR" \
             --target="/home/$NEW_USER" \
             bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
