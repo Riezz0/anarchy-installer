@@ -4,12 +4,75 @@
 from __future__ import annotations
 
 import os
+import pwd
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
+
+
+def relaunch_as_desktop_user() -> None:
+    """Drop sudo privileges before GTK connects to the user's display."""
+    if os.geteuid() != 0:
+        return
+    sudo_uid = os.environ.get("SUDO_UID", "")
+    if not sudo_uid.isdigit() or sudo_uid == "0":
+        return
+
+    try:
+        user = pwd.getpwuid(int(sudo_uid))
+    except (KeyError, ValueError):
+        print("Cannot identify the desktop user that launched this app with sudo.", file=sys.stderr)
+        raise SystemExit(1)
+
+    setpriv = shutil.which("setpriv")
+    if setpriv is None:
+        print("setpriv is required to relaunch the GUI as the desktop user; do not run it with sudo.", file=sys.stderr)
+        raise SystemExit(1)
+
+    environment = os.environ.copy()
+    environment.update(
+        HOME=user.pw_dir,
+        USER=user.pw_name,
+        LOGNAME=user.pw_name,
+        XDG_RUNTIME_DIR=f"/run/user/{user.pw_uid}",
+    )
+    environment.pop("SUDO_UID", None)
+    environment.pop("SUDO_GID", None)
+    environment.pop("SUDO_USER", None)
+    environment.pop("SUDO_COMMAND", None)
+
+    runtime_dir = Path(environment["XDG_RUNTIME_DIR"])
+    if not environment.get("WAYLAND_DISPLAY") and runtime_dir.is_dir():
+        wayland_sockets = sorted(runtime_dir.glob("wayland-*"))
+        if wayland_sockets:
+            environment["WAYLAND_DISPLAY"] = wayland_sockets[0].name
+    bus_socket = runtime_dir / "bus"
+    if not environment.get("DBUS_SESSION_BUS_ADDRESS") and bus_socket.exists():
+        environment["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_socket}"
+
+    command = [
+        setpriv,
+        "--reuid",
+        str(user.pw_uid),
+        "--regid",
+        str(user.pw_gid),
+        "--init-groups",
+        "--",
+        sys.executable,
+        *sys.argv,
+    ]
+    try:
+        os.execvpe(setpriv, command, environment)
+    except OSError as error:
+        print(f"Could not relaunch the installer as {user.pw_name}: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
+
+
+relaunch_as_desktop_user()
 
 import gi
 
@@ -771,6 +834,12 @@ class OfflineInstaller(Gtk.Application):
 
 def main() -> int:
     """Launch the GTK wizard."""
+    if not Gtk.init_check():
+        print(
+            "Could not connect to the desktop display. Start the GUI from your logged-in session without sudo.",
+            file=sys.stderr,
+        )
+        return 1
     app = OfflineInstaller()
     return app.run(None)
 
