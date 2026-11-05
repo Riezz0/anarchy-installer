@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Anarchy Offline Installer
+Comment=Install Anarchy Linux from the bundled offline repository
+Exec=/usr/local/bin/Anarchy-Installer-Offline-GUI
+Icon=system-software-install
+Terminal=false
+Type=Application
+Categories=System;
+Keywords=Arch;Anarchy;Installer;Offline;

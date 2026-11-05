@@ -1,0 +1,779 @@
+#!/usr/bin/env python3
+"""GTK4 wizard for the bundled, offline Anarchy Arch installer."""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import threading
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+
+
+APP_ID = "com.anarchy.OfflineInstaller"
+OFFLINE_REPO = Path("/opt/arch-offline-repo")
+DOTFILES_DIR = Path("/opt/dotfiles")
+BACKEND_CANDIDATES = (
+    Path(__file__).resolve().with_name("Anarchy-Installer-Offline"),
+    Path("/usr/local/bin/Anarchy-Installer-Offline"),
+)
+def run_capture(command: list[str]) -> str:
+    """Run a non-interactive discovery command and return its output."""
+    try:
+        result = subprocess.run(
+            command, check=True, capture_output=True, text=True, timeout=12
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
+
+
+def find_backend() -> Path | None:
+    """Find the installed or colocated shell installer backend."""
+    return next((candidate for candidate in BACKEND_CANDIDATES if candidate.is_file()), None)
+
+
+def available_disks() -> list[tuple[str, str]]:
+    """Return installable block disks as (device path, display label)."""
+    output = run_capture(
+        ["lsblk", "--json", "--nodeps", "-o", "NAME,SIZE,MODEL,TYPE,RO"]
+    )
+    if not output:
+        return []
+    try:
+        import json
+
+        devices = json.loads(output).get("blockdevices", [])
+    except (ValueError, AttributeError):
+        return []
+
+    disks: list[tuple[str, str]] = []
+    for device in devices:
+        if device.get("type") != "disk" or device.get("ro") in (1, True, "1", "true"):
+            continue
+        name = str(device.get("name", ""))
+        if not name or name.startswith("loop") or name.startswith("sr"):
+            continue
+        model = str(device.get("model") or "Disk").strip()
+        size = str(device.get("size") or "Unknown size")
+        disks.append((f"/dev/{name}", f"{name}  ·  {size}  ·  {model}"))
+    return disks
+
+
+def available_timezones() -> list[str]:
+    """Return system timezones, falling back to UTC when unavailable."""
+    result = run_capture(["timedatectl", "list-timezones"])
+    zones = result.splitlines() if result else []
+    return zones or ["UTC"]
+
+
+class OfflineInstaller(Gtk.Application):
+    """Wizard UI and secure handoff to the existing shell installer."""
+
+    def __init__(self) -> None:
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.window: Gtk.ApplicationWindow | None = None
+        self.stack: Gtk.Stack | None = None
+        self.page_title: Gtk.Label | None = None
+        self.page_counter: Gtk.Label | None = None
+        self.back_button: Gtk.Button | None = None
+        self.next_button: Gtk.Button | None = None
+        self.step_labels: list[Gtk.Label] = []
+        self.current_page = 0
+        self.disks = available_disks()
+        self.timezones = available_timezones()
+        self.repository_ready = (OFFLINE_REPO / "offline_repo.db").is_file()
+        self.dotfiles_ready = DOTFILES_DIR.is_dir()
+        self.disk_dropdown: Gtk.DropDown | None = None
+        self.username_entry: Gtk.Entry | None = None
+        self.user_password: Gtk.PasswordEntry | None = None
+        self.user_password_confirm: Gtk.PasswordEntry | None = None
+        self.root_password: Gtk.PasswordEntry | None = None
+        self.root_password_confirm: Gtk.PasswordEntry | None = None
+        self.timezone_dropdown: Gtk.DropDown | None = None
+        self.helper_dropdown: Gtk.DropDown | None = None
+        self.nct_check: Gtk.CheckButton | None = None
+        self.chaotic_check: Gtk.CheckButton | None = None
+        self.review_label: Gtk.Label | None = None
+        self.log_buffer: Gtk.TextBuffer | None = None
+        self.progress_label: Gtk.Label | None = None
+        self.spinner: Gtk.Spinner | None = None
+        self.config_path: Path | None = None
+        self.install_started = False
+        self.install_finished = False
+
+    def do_activate(self) -> None:
+        """Create and present the application window."""
+        if self.window is not None:
+            self.window.present()
+            return
+        self._install_css()
+        self._build_window()
+        assert self.window is not None
+        self.window.present()
+
+    def _install_css(self) -> None:
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+        provider = Gtk.CssProvider()
+        provider.load_from_data(
+            b"""
+            window { background-color: #161821; color: #c0caf5; }
+            .app-shell { background-color: #161821; }
+            .topbar { background-color: #1a1d27; border-bottom: 1px solid #30364a; padding: 18px 26px; }
+            .brand-mark { background: #292e42; border-radius: 14px; color: #bb9af7; padding: 11px; font-size: 20px; font-weight: 800; }
+            .brand-title { color: #c0caf5; font-size: 19px; font-weight: 750; }
+            .brand-subtitle, .muted { color: #7982a9; }
+            .content { padding: 28px; }
+            .hero { color: #c0caf5; font-size: 27px; font-weight: 800; }
+            .description { color: #9aa4c7; font-size: 14px; }
+            .card { background-color: #1f2330; border: 1px solid #30364a; border-radius: 16px; padding: 20px; }
+            .card-title { color: #c0caf5; font-size: 16px; font-weight: 700; }
+            .field-label { color: #a9b1d6; font-weight: 650; }
+            entry, dropdown, spinbutton { background-color: #292e42; color: #c0caf5; border: 1px solid #414868; border-radius: 9px; min-height: 38px; }
+            entry:focus, dropdown:focus { border-color: #7aa2f7; }
+            checkbutton { color: #c0caf5; }
+            .warning-card { background-color: #30291f; border: 1px solid #6b5430; border-radius: 12px; padding: 15px; }
+            .warning-text { color: #e0af68; }
+            .step-number { background-color: #292e42; border-radius: 999px; color: #7982a9; min-width: 30px; min-height: 30px; padding: 5px; font-weight: 700; }
+            .step-active { background-color: #7aa2f7; color: #161821; }
+            .step-done { background-color: #9ece6a; color: #161821; }
+            .sidebar { background-color: #1a1d27; border-right: 1px solid #30364a; padding: 23px 15px; }
+            .footer { background-color: #1a1d27; border-top: 1px solid #30364a; padding: 15px 24px; }
+            button { border-radius: 10px; padding: 9px 16px; font-weight: 650; }
+            button.suggested-action { background-color: #7aa2f7; color: #161821; }
+            button.destructive-action { background-color: #f7768e; color: #161821; }
+            .log-view { background-color: #101219; color: #c0caf5; font-family: monospace; font-size: 12px; padding: 12px; }
+            .success-title { color: #9ece6a; font-size: 26px; font-weight: 800; }
+            .error-title { color: #f7768e; font-size: 26px; font-weight: 800; }
+            """
+        )
+        Gtk.StyleContext.add_provider_for_display(
+            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+    @staticmethod
+    def _label(text: str, css_class: str | None = None) -> Gtk.Label:
+        label = Gtk.Label(label=text)
+        label.set_xalign(0)
+        label.set_wrap(True)
+        if css_class:
+            label.add_css_class(css_class)
+        return label
+
+    @staticmethod
+    def _vbox(spacing: int = 12) -> Gtk.Box:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
+        return box
+
+    @staticmethod
+    def _card(title: str, subtitle: str, child: Gtk.Widget) -> Gtk.Box:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.add_css_class("card")
+        card.append(OfflineInstaller._label(title, "card-title"))
+        if subtitle:
+            card.append(OfflineInstaller._label(subtitle, "muted"))
+        card.append(child)
+        return card
+
+    @staticmethod
+    def _field(label: str, widget: Gtk.Widget) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        row.append(OfflineInstaller._label(label, "field-label"))
+        row.append(widget)
+        return row
+
+    def _build_window(self) -> None:
+        self.window = Gtk.ApplicationWindow(application=self, title="Anarchy Offline Installer")
+        self.window.set_default_size(1020, 740)
+        self.window.set_size_request(780, 620)
+        self.window.connect("close-request", self._on_close_request)
+
+        shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        shell.add_css_class("app-shell")
+        shell.append(self._build_header())
+
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        body.append(self._build_sidebar())
+        content = self._vbox(0)
+        content.set_hexpand(True)
+        content.set_vexpand(True)
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(180)
+        self.stack.set_hexpand(True)
+        self.stack.set_vexpand(True)
+        for name, page in (
+            ("welcome", self._build_welcome_page()),
+            ("account", self._build_account_page()),
+            ("options", self._build_options_page()),
+            ("review", self._build_review_page()),
+            ("progress", self._build_progress_page()),
+        ):
+            self.stack.add_named(page, name)
+        content.append(self.stack)
+        body.append(content)
+        shell.append(body)
+        shell.append(self._build_footer())
+        self.window.set_child(shell)
+        self._show_page(0)
+
+    def _build_header(self) -> Gtk.Widget:
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=13)
+        header.add_css_class("topbar")
+        mark = self._label("A", "brand-mark")
+        mark.set_xalign(0.5)
+        mark.set_yalign(0.5)
+        header.append(mark)
+        brand = self._vbox(2)
+        brand.append(self._label("ANARCHY  /  OFFLINE SETUP", "brand-title"))
+        brand.append(self._label("A guided installation for your system", "brand-subtitle"))
+        header.append(brand)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        header.append(spacer)
+        badge = self._label("●  OFFLINE REPOSITORY", "muted")
+        header.append(badge)
+        return header
+
+    def _build_sidebar(self) -> Gtk.Widget:
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=17)
+        sidebar.add_css_class("sidebar")
+        sidebar.set_size_request(205, -1)
+        sidebar.append(self._label("INSTALLATION", "muted"))
+        for index, name in enumerate(("Drive", "Account", "Customize", "Review"), start=1):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=11)
+            number = self._label(str(index), "step-number")
+            number.set_xalign(0.5)
+            number.set_yalign(0.5)
+            self.step_labels.append(number)
+            row.append(number)
+            row.append(self._label(name, "field-label"))
+            sidebar.append(row)
+        spacer = Gtk.Box()
+        spacer.set_vexpand(True)
+        sidebar.append(spacer)
+        sidebar.append(self._label("Your bundled packages and dotfiles stay local. Optional network features are clearly marked.", "muted"))
+        return sidebar
+
+    def _build_footer(self) -> Gtk.Widget:
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        footer.add_css_class("footer")
+        self.page_title = self._label("Choose a drive", "muted")
+        self.page_title.set_hexpand(True)
+        footer.append(self.page_title)
+        self.page_counter = self._label("STEP 1 OF 4", "muted")
+        footer.append(self.page_counter)
+        self.back_button = Gtk.Button(label="Back")
+        self.back_button.connect("clicked", lambda _button: self._show_page(self.current_page - 1))
+        footer.append(self.back_button)
+        self.next_button = Gtk.Button(label="Continue  →")
+        self.next_button.add_css_class("suggested-action")
+        self.next_button.connect("clicked", self._on_next)
+        footer.append(self.next_button)
+        return footer
+
+    def _build_welcome_page(self) -> Gtk.Widget:
+        page = self._page_box()
+        page.append(self._label("Let’s prepare your system.", "hero"))
+        page.append(self._label("Select the target drive. The installer will create a Btrfs system with separate home, log, package-cache, and snapshot subvolumes.", "description"))
+        options = [label for _path, label in self.disks]
+        if not options:
+            options = ["No writable drives detected"]
+        self.disk_dropdown = Gtk.DropDown.new_from_strings(options)
+        self.disk_dropdown.set_enable_search(True)
+        self.disk_dropdown.set_hexpand(True)
+        card = self._vbox(15)
+        card.add_css_class("card")
+        card.append(self._label("INSTALL TARGET", "card-title"))
+        card.append(self._label("All data on the selected drive will be erased.", "muted"))
+        card.append(self.disk_dropdown)
+        page.append(card)
+        warning = self._vbox(7)
+        warning.add_css_class("warning-card")
+        warning.append(self._label("⚠  This is a destructive operation", "warning-text"))
+        warning.append(self._label("The selected disk will be repartitioned and formatted. You’ll review the exact target again before starting.", "warning-text"))
+        page.append(warning)
+        bundle_status = self._vbox(7)
+        bundle_status.add_css_class("card")
+        bundle_status.append(self._label("OFFLINE INSTALLATION BUNDLE", "card-title"))
+        bundle_status.append(
+            self._label(
+                ("✓  Offline package repository is ready" if self.repository_ready else "✕  Offline package repository is missing"),
+                "description",
+            )
+        )
+        bundle_status.append(
+            self._label(
+                ("✓  Desktop dotfiles are ready" if self.dotfiles_ready else "✕  Desktop dotfiles are missing"),
+                "description",
+            )
+        )
+        page.append(bundle_status)
+        if not Path("/sys/firmware/efi").is_dir():
+            page.append(self._label("This offline installer expects the live USB to be booted in UEFI mode.", "warning-text"))
+        return page
+
+    def _password_entry(self, placeholder: str) -> Gtk.Entry:
+        entry = Gtk.Entry()
+        entry.set_visibility(False)
+        entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        entry.set_placeholder_text(placeholder)
+        return entry
+
+    def _build_account_page(self) -> Gtk.Widget:
+        page = self._page_box()
+        page.append(self._label("Create your account.", "hero"))
+        page.append(self._label("These credentials are used to configure the installed system.", "description"))
+        self.username_entry = Gtk.Entry()
+        self.username_entry.set_placeholder_text("e.g. dev")
+        self.user_password = self._password_entry("User password")
+        self.user_password_confirm = self._password_entry("Confirm user password")
+        self.root_password = self._password_entry("Root password")
+        self.root_password_confirm = self._password_entry("Confirm root password")
+        grid = Gtk.Grid(column_spacing=18, row_spacing=15)
+        grid.attach(self._field("USERNAME", self.username_entry), 0, 0, 2, 1)
+        grid.attach(self._field("USER PASSWORD", self.user_password), 0, 1, 1, 1)
+        grid.attach(self._field("CONFIRM USER PASSWORD", self.user_password_confirm), 1, 1, 1, 1)
+        grid.attach(self._field("ROOT PASSWORD", self.root_password), 0, 2, 1, 1)
+        grid.attach(self._field("CONFIRM ROOT PASSWORD", self.root_password_confirm), 1, 2, 1, 1)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        card.add_css_class("card")
+        card.append(self._label("LOCAL ACCOUNT", "card-title"))
+        card.append(grid)
+        page.append(card)
+        page.append(self._label("Passwords are kept in a temporary mode-600 settings file and removed after the installer exits.", "muted"))
+        return page
+
+    def _build_options_page(self) -> Gtk.Widget:
+        page = self._page_box()
+        page.append(self._label("Make it yours.", "hero"))
+        page.append(self._label("Choose your timezone and optional components.", "description"))
+        self.timezone_dropdown = Gtk.DropDown.new_from_strings(self.timezones)
+        self.timezone_dropdown.set_enable_search(True)
+        self.timezone_dropdown.set_selected(self.timezones.index("UTC") if "UTC" in self.timezones else 0)
+        timezone_card = self._vbox(10)
+        timezone_card.add_css_class("card")
+        timezone_card.append(self._label("TIMEZONE", "card-title"))
+        timezone_card.append(self._label("Type to search locations such as Europe/London or America/New_York.", "muted"))
+        timezone_card.append(self.timezone_dropdown)
+        page.append(timezone_card)
+
+        helper_items = ["yay", "paru", "pikaur"]
+        self.helper_dropdown = Gtk.DropDown.new_from_strings(helper_items)
+        helper_card = self._vbox(10)
+        helper_card.add_css_class("card")
+        helper_card.append(self._label("AUR HELPER", "card-title"))
+        helper_card.append(self._label("Choose one helper to install. This does not enable an AUR repository.", "muted"))
+        helper_card.append(self.helper_dropdown)
+        page.append(helper_card)
+
+        optional_card = self._vbox(12)
+        optional_card.add_css_class("card")
+        optional_card.append(self._label("OPTIONAL NETWORK FEATURES", "card-title"))
+        optional_card.append(self._label("These options require an internet connection during installation.", "muted"))
+        self.nct_check = Gtk.CheckButton(label="Install NCT6687D fan controller driver (DKMS)")
+        self.nct_check.set_active(Path("/opt/dotfiles/nct6687d").is_dir())
+        optional_card.append(self.nct_check)
+        self.chaotic_check = Gtk.CheckButton(label="Enable Chaotic-AUR repository")
+        optional_card.append(self.chaotic_check)
+        page.append(optional_card)
+        return page
+
+    def _build_review_page(self) -> Gtk.Widget:
+        page = self._page_box()
+        page.append(self._label("Ready when you are.", "hero"))
+        page.append(self._label("Review your selections. Nothing is changed until you start the install.", "description"))
+        self.review_label = self._label("", "card-title")
+        review = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        review.add_css_class("card")
+        review.append(self._label("INSTALL SUMMARY", "card-title"))
+        review.append(self.review_label)
+        page.append(review)
+        warning = self._vbox(7)
+        warning.add_css_class("warning-card")
+        warning.append(self._label("FINAL CHECK  ·  THE DRIVE WILL BE ERASED", "warning-text"))
+        warning.append(self._label("Before proceeding, back up any files you need from the selected disk.", "warning-text"))
+        page.append(warning)
+        return page
+
+    def _build_progress_page(self) -> Gtk.Widget:
+        page = self._page_box()
+        self.progress_label = self._label("Preparing installation…", "card-title")
+        page.append(self.progress_label)
+        self.spinner = Gtk.Spinner()
+        self.spinner.set_spinning(True)
+        page.append(self.spinner)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_hexpand(True)
+        scroll.set_min_content_height(310)
+        text_view = Gtk.TextView()
+        text_view.set_editable(False)
+        text_view.set_cursor_visible(False)
+        text_view.set_monospace(True)
+        text_view.add_css_class("log-view")
+        self.log_buffer = text_view.get_buffer()
+        scroll.set_child(text_view)
+        page.append(scroll)
+        return page
+
+    def _page_box(self) -> Gtk.Box:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        page.add_css_class("content")
+        page.set_hexpand(True)
+        page.set_vexpand(True)
+        return page
+
+    def _selected(self, dropdown: Gtk.DropDown, values: list[str]) -> str:
+        index = dropdown.get_selected()
+        if index >= len(values):
+            return ""
+        return values[index]
+
+    def _selected_disk(self) -> tuple[str, str] | None:
+        if self.disk_dropdown is None or not self.disks:
+            return None
+        index = self.disk_dropdown.get_selected()
+        return self.disks[index] if index < len(self.disks) else None
+
+    def _validate_current(self) -> bool:
+        assert self.window is not None
+        if self.current_page == 0:
+            if not self.repository_ready or not self.dotfiles_ready:
+                self._error("The offline package repository or dotfiles bundle is missing. Rebuild the ISO with both bundles included.")
+                return False
+            selected = self._selected_disk()
+            if selected is None:
+                self._error("No writable drive was detected. Check the live system and try again.")
+                return False
+            if not Path("/sys/firmware/efi").is_dir():
+                self._error("Boot the live USB in UEFI mode before installing.")
+                return False
+        elif self.current_page == 1:
+            assert self.username_entry and self.user_password and self.user_password_confirm
+            assert self.root_password and self.root_password_confirm
+            username = self.username_entry.get_text().strip()
+            if not re.fullmatch(r"[a-z_][a-z0-9_-]*", username):
+                self._error("Enter a lowercase username using letters, numbers, _ or -.")
+                return False
+            if not self.user_password.get_text():
+                self._error("The user password cannot be empty.")
+                return False
+            if self.user_password.get_text() != self.user_password_confirm.get_text():
+                self._error("The user password fields do not match.")
+                return False
+            if not self.root_password.get_text():
+                self._error("The root password cannot be empty.")
+                return False
+            if self.root_password.get_text() != self.root_password_confirm.get_text():
+                self._error("The root password fields do not match.")
+                return False
+        elif self.current_page == 2:
+            assert self.timezone_dropdown is not None
+            if not self._selected(self.timezone_dropdown, self.timezones):
+                self._error("Select a timezone to continue.")
+                return False
+        return True
+
+    def _on_next(self, _button: Gtk.Button) -> None:
+        if self.install_finished:
+            self.quit()
+        elif self.current_page < 3:
+            if not self._validate_current():
+                return
+            if self.current_page == 2:
+                self._refresh_review()
+            self._show_page(self.current_page + 1)
+        else:
+            self._request_install()
+
+    def _show_page(self, page: int) -> None:
+        if page < 0 or page > 4 or self.stack is None:
+            return
+        self.current_page = page
+        names = ("welcome", "account", "options", "review", "progress")
+        titles = ("Choose a drive", "Create an account", "Customize your install", "Review your choices", "Installing Anarchy")
+        self.stack.set_visible_child_name(names[page])
+        if self.page_title:
+            self.page_title.set_text(titles[page])
+        if self.page_counter:
+            self.page_counter.set_text("INSTALLING" if page == 4 else f"STEP {page + 1} OF 4")
+        if self.back_button:
+            self.back_button.set_visible(page < 3)
+            self.back_button.set_sensitive(page > 0)
+        if self.next_button:
+            self.next_button.set_visible(page < 4)
+            button_labels = {
+                0: "Account details  →",
+                1: "Customize  →",
+                2: "Review install  →",
+                3: "Start installation",
+            }
+            self.next_button.set_label(button_labels.get(page, "Continue  →"))
+            self.next_button.set_sensitive(page < 4)
+        for index, label in enumerate(self.step_labels):
+            label.remove_css_class("step-active")
+            label.remove_css_class("step-done")
+            if index < page:
+                label.add_css_class("step-done")
+            elif index == page:
+                label.add_css_class("step-active")
+
+    def _refresh_review(self) -> None:
+        assert self.review_label and self.username_entry and self.timezone_dropdown
+        assert self.helper_dropdown and self.nct_check and self.chaotic_check
+        disk = self._selected_disk()
+        disk_name = disk[1] if disk else "No drive"
+        values = (
+            ("Target drive", disk_name),
+            ("User", self.username_entry.get_text().strip()),
+            ("Hostname", "arch-zen-hyprland"),
+            ("Timezone", self._selected(self.timezone_dropdown, self.timezones)),
+            ("AUR helper", self._selected(self.helper_dropdown, ["yay", "paru", "pikaur"])),
+            ("NCT6687D", "Enabled" if self.nct_check.get_active() else "Disabled"),
+            ("Chaotic-AUR", "Enabled" if self.chaotic_check.get_active() else "Disabled"),
+        )
+        self.review_label.set_text("\n".join(f"{label:<14} {value}" for label, value in values))
+
+    def _error(self, message: str) -> None:
+        assert self.window is not None
+        dialog = Gtk.AlertDialog(message=message)
+        dialog.set_detail("Please check the highlighted settings and try again.")
+        dialog.show(self.window)
+
+    def _request_install(self) -> None:
+        assert self.window is not None
+        disk = self._selected_disk()
+        if disk is None:
+            self._error("No install drive is selected.")
+            return
+        dialog = Gtk.AlertDialog(
+            message=f"Erase {disk[0]} and install Anarchy?",
+            detail="All data on this drive will be destroyed. This cannot be undone.",
+            buttons=["Cancel", "Erase drive and install"],
+            default_button=0,
+            cancel_button=0,
+        )
+        dialog.choose(self.window, None, self._confirm_install)
+
+    def _confirm_install(self, dialog: Gtk.AlertDialog, result: Gio.AsyncResult) -> None:
+        try:
+            response = dialog.choose_finish(result)
+        except GLib.Error:
+            return
+        if response == 1:
+            if os.geteuid() == 0:
+                self._begin_install(None)
+            elif self._sudo_is_ready():
+                self._begin_install(None)
+            else:
+                self._show_sudo_dialog()
+
+    @staticmethod
+    def _sudo_is_ready() -> bool:
+        """Check whether sudo can authorize non-interactively."""
+        try:
+            return subprocess.run(
+                ["sudo", "-n", "true"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def _show_sudo_dialog(self) -> None:
+        assert self.window is not None
+        dialog = Gtk.Dialog(title="Authorize installation", transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Authorize", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        area = dialog.get_content_area()
+        area.set_spacing(12)
+        area.set_margin_top(18)
+        area.set_margin_bottom(18)
+        area.set_margin_start(20)
+        area.set_margin_end(20)
+        area.append(self._label("Enter your live-session password to authorize the disk installation.", "description"))
+        password = self._password_entry("Live-session password")
+        area.append(password)
+
+        def response_handler(_dialog: Gtk.Dialog, response_id: int) -> None:
+            secret = password.get_text()
+            dialog.destroy()
+            if response_id == Gtk.ResponseType.OK and secret:
+                self._begin_install(secret)
+
+        dialog.connect("response", response_handler)
+        dialog.present()
+
+    def _write_config(self) -> Path:
+        assert self.username_entry and self.user_password and self.root_password
+        assert self.timezone_dropdown and self.helper_dropdown
+        assert self.nct_check and self.chaotic_check
+        disk = self._selected_disk()
+        if disk is None:
+            raise RuntimeError("No target drive is selected")
+        values = (
+            disk[0],
+            self.username_entry.get_text().strip(),
+            self.user_password.get_text(),
+            self.root_password.get_text(),
+            self._selected(self.timezone_dropdown, self.timezones),
+            self._selected(self.helper_dropdown, ["yay", "paru", "pikaur"]),
+            "true" if self.nct_check.get_active() else "false",
+            "true" if self.chaotic_check.get_active() else "false",
+        )
+        fd, filename = tempfile.mkstemp(prefix="anarchy-offline-", dir="/tmp")
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as config:
+            config.write(b"\0".join(value.encode("utf-8") for value in values) + b"\0")
+        self.user_password.set_text("")
+        self.user_password_confirm.set_text("")
+        self.root_password.set_text("")
+        self.root_password_confirm.set_text("")
+        self.config_path = Path(filename)
+        return self.config_path
+
+    def _begin_install(self, sudo_password: str | None) -> None:
+        backend = find_backend()
+        if backend is None:
+            self._error("Could not find Anarchy-Installer-Offline next to this app or in /usr/local/bin.")
+            return
+        try:
+            config = self._write_config()
+        except (OSError, RuntimeError) as error:
+            self._error(f"Could not prepare secure installer settings: {error}")
+            return
+
+        if os.geteuid() == 0:
+            command = ["env", f"ANARCHY_INSTALLER_CONFIG={config}", "bash", str(backend)]
+        elif sudo_password is None:
+            command = [
+                "sudo", "-n", "--", "env",
+                f"ANARCHY_INSTALLER_CONFIG={config}", "bash", str(backend),
+            ]
+        else:
+            if shutil.which("sudo") is None:
+                self._remove_config()
+                self._error("sudo is not available in this live environment.")
+                return
+            command = [
+                "sudo", "-k", "-S", "--", "env",
+                f"ANARCHY_INSTALLER_CONFIG={config}", "bash", str(backend),
+            ]
+
+        self._show_page(4)
+        self.install_started = True
+        if self.next_button:
+            self.next_button.set_visible(False)
+        if self.spinner:
+            self.spinner.start()
+        assert self.log_buffer is not None
+        self.log_buffer.set_text("Starting the installer…\n")
+        threading.Thread(
+            target=self._run_installer,
+            args=(command, sudo_password),
+            daemon=True,
+        ).start()
+
+    def _run_installer(self, command: list[str], sudo_password: str) -> None:
+        process: subprocess.Popen[str] | None = None
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE if sudo_password is not None else subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=os.environ.copy(),
+            )
+            if process.stdin is not None:
+                process.stdin.write((sudo_password or "") + "\n")
+                process.stdin.close()
+            if process.stdout is not None:
+                for line in process.stdout:
+                    GLib.idle_add(self._append_log, line.rstrip("\n"))
+            return_code = process.wait()
+            GLib.idle_add(self._finish_install, return_code)
+        except OSError as error:
+            GLib.idle_add(self._append_log, f"Could not start installer: {error}")
+            GLib.idle_add(self._finish_install, 1)
+        finally:
+            self._remove_config()
+
+    def _append_log(self, line: str) -> bool:
+        if line.startswith("ANARCHY_STEP:"):
+            if self.progress_label:
+                self.progress_label.set_text(line.removeprefix("ANARCHY_STEP:"))
+            return GLib.SOURCE_REMOVE
+        if self.log_buffer is not None:
+            end = self.log_buffer.get_end_iter()
+            self.log_buffer.insert(end, line + "\n")
+        return GLib.SOURCE_REMOVE
+
+    def _finish_install(self, return_code: int) -> bool:
+        self.install_finished = True
+        if self.spinner:
+            self.spinner.stop()
+        if self.progress_label:
+            self.progress_label.set_text(
+                "Installation complete — you can reboot now."
+                if return_code == 0
+                else "Installation stopped. Review the log for details."
+            )
+            self.progress_label.remove_css_class("card-title")
+            self.progress_label.add_css_class("success-title" if return_code == 0 else "error-title")
+        if self.page_counter:
+            self.page_counter.set_text("COMPLETE" if return_code == 0 else "NEEDS ATTENTION")
+        if self.back_button:
+            self.back_button.set_visible(False)
+        if self.next_button:
+            self.next_button.set_visible(True)
+            self.next_button.set_label("Close")
+            self.next_button.set_sensitive(True)
+            self.next_button.remove_css_class("suggested-action")
+        if self.log_buffer is not None and return_code == 0:
+            end = self.log_buffer.get_end_iter()
+            self.log_buffer.insert(
+                end,
+                "\nInstallation completed. You may close this window and reboot.\n",
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _on_close_request(self, _window: Gtk.Window) -> bool:
+        """Keep the installer visible while it is modifying the disk."""
+        if self.install_started and not self.install_finished:
+            return True
+        return False
+
+    def _remove_config(self) -> None:
+        if self.config_path is not None:
+            try:
+                self.config_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.config_path = None
+
+
+def main() -> int:
+    """Launch the GTK wizard."""
+    app = OfflineInstaller()
+    return app.run(None)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
