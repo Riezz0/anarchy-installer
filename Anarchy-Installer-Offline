@@ -329,11 +329,10 @@ if ! run_progress 'Installing packages from the offline repository' \
     python-libsass python-material-color-utilities python-pywal16 python-pywalfox python-yapsy-git \
     qt5-styleplugins slurp-git vesktop-bin ttf-font-awesome-4 ttf-font-awesome-5 vkbasalt \
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
-    arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa 
+    arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa \
     xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet qt5ct qt6ct \
-    gcc chromium liquidctl libqalculate libcava cava aubio brightnessctl power-profiles-daemon fish \ 
-    gcc ddcutil swappy qt6-imageformats lm_sensors pipewire cliphist \
-    wl-clipboard libcava\
+    chromium liquidctl libqalculate cava aubio brightnessctl power-profiles-daemon fish \
+    gcc ddcutil swappy qt6-imageformats lm_sensors pipewire cliphist wl-clipboard quickshell \
     "$AUR_HELPER_PACKAGE"; then
     fail 'Offline package installation failed. See the output above.'
     exit 1
