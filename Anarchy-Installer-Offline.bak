@@ -21,13 +21,39 @@ DOTFILES_SOURCE_DIR="/opt/dotfiles"
 PACMAN_CONF_FILE=''
 CHROOT_SCRIPT=''
 CHROOT_VALUES=''
+GUI_CONFIG_FILE=${ANARCHY_INSTALLER_CONFIG:-}
+GUI_MODE=false
+[[ -n "$GUI_CONFIG_FILE" ]] && GUI_MODE=true
 
 BG='#1a1b26'; FG='#c0caf5'; BLUE='#7aa2f7'; GREEN='#9ece6a'
 YELLOW='#e0af68'; RED='#f7768e'; PURPLE='#bb9af7'
-banner() { gum style --foreground "$PURPLE" --border double --border-foreground "$BLUE" --padding '0 2' --bold "$1"; }
-step() { gum style --foreground "$BLUE" --bold "➜ $*"; }
-ok() { gum style --foreground "$GREEN" "✓ $*"; }
-fail() { gum style --foreground "$RED" --bold "✖ $*" >&2; }
+banner() {
+    if $GUI_MODE; then printf '\n=== %s ===\n' "$1";
+    else gum style --foreground "$PURPLE" --border double --border-foreground "$BLUE" --padding '0 2' --bold "$1"; fi
+}
+step() {
+    if $GUI_MODE; then printf 'ANARCHY_STEP:%s\n' "$*";
+    else gum style --foreground "$BLUE" --bold "➜ $*"; fi
+}
+ok() {
+    if $GUI_MODE; then printf '✓ %s\n' "$*";
+    else gum style --foreground "$GREEN" "✓ $*"; fi
+}
+fail() {
+    if $GUI_MODE; then printf '✖ %s\n' "$*" >&2;
+    else gum style --foreground "$RED" --bold "✖ $*" >&2; fi
+}
+warn() {
+    if $GUI_MODE; then printf '⚠ %s\n' "$*";
+    else gum style --foreground "$YELLOW" "$*"; fi
+}
+run_progress() {
+    local title=$1
+    shift
+    step "$title"
+    if $GUI_MODE; then "$@";
+    else gum spin --spinner dot --show-error --title "$title" -- "$@"; fi
+}
 
 unmount_target() {
     cd /
@@ -68,13 +94,22 @@ cleanup() {
         unmount_target || true
     fi
     [[ -n "$PACMAN_CONF_FILE" ]] && rm -f "$PACMAN_CONF_FILE"
+    if [[ "$GUI_CONFIG_FILE" == /tmp/anarchy-offline-* && -f "$GUI_CONFIG_FILE" && ! -L "$GUI_CONFIG_FILE" ]]; then
+        local config_owner config_mode expected_owner
+        config_owner=$(stat -c '%u' "$GUI_CONFIG_FILE" 2>/dev/null || true)
+        config_mode=$(stat -c '%a' "$GUI_CONFIG_FILE" 2>/dev/null || true)
+        expected_owner=${SUDO_UID:-$EUID}
+        if [[ "$config_owner" == "$expected_owner" && "$config_mode" == 600 ]]; then
+            rm -f "$GUI_CONFIG_FILE"
+        fi
+    fi
     exit "$status"
 }
 
 # Clear mounts left behind by an earlier failed run, the same way the online
 # installer does, so retries always start from a clean slate.
 if mountpoint -q /mnt; then
-    gum style --foreground "$YELLOW" 'Clearing leftover mounts from a previous run...'
+    warn 'Clearing leftover mounts from a previous run...'
     unmount_target || { fail 'Could not clear the leftover mounts at /mnt.'; exit 1; }
 fi
 trap cleanup EXIT
@@ -92,128 +127,140 @@ fi
 for required_path in \
     sys/grub/grub sys/grub/tokyo-night sys/sddm/anarchy-sddm \
     sys/sddm/sddm.conf sys/sddm/initial-setup sys/fonts \
-    scripts bg cursors cursors/.local/share/icons fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
-    kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh; do
+    scripts bg coolercontrol/etc/coolercontrol/config.toml cursors cursors/.local/share/icons fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
+    kvantum neovim omz pywal qt5 qt6 rofi themes wal xkb zsh; do
     if [[ ! -e "$DOTFILES_SOURCE_DIR/$required_path" ]]; then
         fail "Required dotfiles path is missing: $DOTFILES_SOURCE_DIR/$required_path"
         exit 1
     fi
 done
 
-# --- DYNAMIC DRIVE SELECTION ---
-banner 'Target Drive'
-DISK_SELECTION=$(lsblk -dno NAME,SIZE,MODEL | grep -v loop | gum choose \
-    --header 'Select the drive to install onto' --cursor '➜ ' --height 12 || true)
-if [[ -z "$DISK_SELECTION" ]]; then
-    gum style --foreground "$YELLOW" 'Installation cancelled.'
-    exit 0
-fi
-DISK="/dev/${DISK_SELECTION%% *}"
-if [[ ! -b "$DISK" ]]; then
-    fail "Invalid block device: $DISK"
-    exit 1
-fi
-ok "Target drive: $DISK"
-
-if [[ "$DISK" == *"nvme"* ]] || [[ "$DISK" == *"mmcblk"* ]]; then
-    EFI_PART="${DISK}p1"
-    ROOT_PART="${DISK}p2"
-else
-    EFI_PART="${DISK}1"
-    ROOT_PART="${DISK}2"
-fi
-
-# --- USER ACCOUNT CONFIGURATION PROMPTS ---
 HOSTNAME="arch-zen-hyprland"
 KEYMAP="us"
 
-banner 'User Account'
-while true; do
-    NEW_USER=$(gum input --prompt 'Username: ' --placeholder 'e.g. dev')
-    if [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-        break
+if $GUI_MODE; then
+    if [[ "$GUI_CONFIG_FILE" != /tmp/anarchy-offline-* || ! -f "$GUI_CONFIG_FILE" || -L "$GUI_CONFIG_FILE" ]]; then
+        fail 'GUI settings file is missing or invalid.'
+        exit 1
     fi
-    fail 'Invalid username. Use lowercase letters, numbers, - and _.'
-done
-
-while true; do
-    USER_PASS=$(gum input --password --prompt "Password for $NEW_USER: ")
-    USER_PASS_CONFIRM=$(gum input --password --prompt 'Confirm password: ')
-    if [[ -n "$USER_PASS" && "$USER_PASS" == "$USER_PASS_CONFIRM" ]]; then
-        break
+    CONFIG_MODE=$(stat -c '%a' "$GUI_CONFIG_FILE")
+    CONFIG_OWNER=$(stat -c '%u' "$GUI_CONFIG_FILE")
+    EXPECTED_OWNER=${SUDO_UID:-$EUID}
+    if [[ "$CONFIG_MODE" != 600 || "$CONFIG_OWNER" != "$EXPECTED_OWNER" ]]; then
+        fail 'GUI settings must be an owner-only temporary file.'
+        exit 1
     fi
-    fail 'Passwords do not match or are empty. Please try again.'
-done
-
-while true; do
-    ROOT_PASS=$(gum input --password --prompt 'Root password: ')
-    ROOT_PASS_CONFIRM=$(gum input --password --prompt 'Confirm root password: ')
-    if [[ -n "$ROOT_PASS" && "$ROOT_PASS" == "$ROOT_PASS_CONFIRM" ]]; then
-        break
+    mapfile -d '' -t GUI_SETTINGS < "$GUI_CONFIG_FILE"
+    if (( ${#GUI_SETTINGS[@]} != 8 )); then
+        fail 'GUI settings file is incomplete; expected 8 values.'
+        exit 1
     fi
-    fail 'Passwords do not match or are empty. Please try again.'
-done
+    DISK=${GUI_SETTINGS[0]}
+    NEW_USER=${GUI_SETTINGS[1]}
+    USER_PASS=${GUI_SETTINGS[2]}
+    ROOT_PASS=${GUI_SETTINGS[3]}
+    TIMEZONE=${GUI_SETTINGS[4]}
+    AUR_HELPER=${GUI_SETTINGS[5]}
+    INSTALL_NCT6687D=${GUI_SETTINGS[6]}
+    INSTALL_CHAOTIC_AUR=${GUI_SETTINGS[7]}
+    [[ -b "$DISK" ]] || { fail "Invalid block device: $DISK"; exit 1; }
+    [[ "$(lsblk -dnro TYPE "$DISK")" == disk ]] || { fail 'Select a whole disk, not a partition.'; exit 1; }
+    [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { fail 'Invalid username.'; exit 1; }
+    [[ -n "$USER_PASS" && -n "$ROOT_PASS" ]] || { fail 'Passwords cannot be empty.'; exit 1; }
+    [[ "$TIMEZONE" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]] || { fail 'Invalid timezone format.'; exit 1; }
+    [[ -f "/usr/share/zoneinfo/$TIMEZONE" ]] || { fail "Invalid timezone: $TIMEZONE"; exit 1; }
+    [[ "$INSTALL_NCT6687D" == true || "$INSTALL_NCT6687D" == false ]] || { fail 'Invalid NCT6687D option.'; exit 1; }
+    [[ "$INSTALL_CHAOTIC_AUR" == true || "$INSTALL_CHAOTIC_AUR" == false ]] || { fail 'Invalid Chaotic-AUR option.'; exit 1; }
+    case "$AUR_HELPER" in
+        yay) AUR_HELPER_PACKAGE=yay ;;
+        paru) AUR_HELPER_PACKAGE=paru ;;
+        pikaur) AUR_HELPER_PACKAGE=pikaur-git ;;
+        *) fail 'Invalid AUR helper selection.'; exit 1 ;;
+    esac
+    ok "GUI settings received for $DISK"
+else
+    # --- DYNAMIC DRIVE SELECTION ---
+    banner 'Target Drive'
+    DISK_SELECTION=$(lsblk -dno NAME,SIZE,MODEL | grep -v loop | gum choose \
+        --header 'Select the drive to install onto' --cursor '➜ ' --height 12 || true)
+    if [[ -z "$DISK_SELECTION" ]]; then
+        warn 'Installation cancelled.'
+        exit 0
+    fi
+    DISK="/dev/${DISK_SELECTION%% *}"
+    if [[ ! -b "$DISK" ]]; then fail "Invalid block device: $DISK"; exit 1; fi
+    ok "Target drive: $DISK"
 
-# --- TIMEZONE CONFIGURATION PROMPT ---
-banner 'Timezone'
-TIMEZONE=$(timedatectl list-timezones | gum filter \
-    --placeholder 'Search timezone, e.g. Europe/London' || true)
-TIMEZONE=${TIMEZONE:-UTC}
-ok "Timezone: $TIMEZONE"
+    banner 'User Account'
+    while true; do
+        NEW_USER=$(gum input --prompt 'Username: ' --placeholder 'e.g. dev')
+        [[ "$NEW_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] && break
+        fail 'Invalid username. Use lowercase letters, numbers, - and _.'
+    done
+    while true; do
+        USER_PASS=$(gum input --password --prompt "Password for $NEW_USER: ")
+        USER_PASS_CONFIRM=$(gum input --password --prompt 'Confirm password: ')
+        [[ -n "$USER_PASS" && "$USER_PASS" == "$USER_PASS_CONFIRM" ]] && break
+        fail 'Passwords do not match or are empty. Please try again.'
+    done
+    while true; do
+        ROOT_PASS=$(gum input --password --prompt 'Root password: ')
+        ROOT_PASS_CONFIRM=$(gum input --password --prompt 'Confirm root password: ')
+        [[ -n "$ROOT_PASS" && "$ROOT_PASS" == "$ROOT_PASS_CONFIRM" ]] && break
+        fail 'Passwords do not match or are empty. Please try again.'
+    done
 
-banner 'AUR Helper'
-AUR_HELPER=$(gum choose --header 'Select one AUR helper to install' \
-    --cursor '➜ ' yay paru pikaur || true)
-if [[ -z "$AUR_HELPER" ]]; then
-    gum style --foreground "$YELLOW" 'Installation cancelled.'
-    exit 0
+    banner 'Timezone'
+    TIMEZONE=$(timedatectl list-timezones | gum filter \
+        --placeholder 'Search timezone, e.g. Europe/London' || true)
+    TIMEZONE=${TIMEZONE:-UTC}
+    ok "Timezone: $TIMEZONE"
+
+    banner 'AUR Helper'
+    AUR_HELPER=$(gum choose --header 'Select one AUR helper to install' \
+        --cursor '➜ ' yay paru pikaur || true)
+    [[ -n "$AUR_HELPER" ]] || { warn 'Installation cancelled.'; exit 0; }
+    case "$AUR_HELPER" in
+        yay) AUR_HELPER_PACKAGE=yay ;;
+        paru) AUR_HELPER_PACKAGE=paru ;;
+        pikaur) AUR_HELPER_PACKAGE=pikaur-git ;;
+    esac
+
+    INSTALL_NCT6687D=false
+    if [[ -d "$DOTFILES_SOURCE_DIR/nct6687d" ]]; then
+        INSTALL_NCT6687D=true
+    elif gum confirm --affirmative 'Install' --negative 'Skip' \
+        'Install the NCT6687D DKMS driver? (requires Internet)'; then
+        INSTALL_NCT6687D=true
+    fi
+    INSTALL_CHAOTIC_AUR=false
+    if gum confirm --affirmative 'Enable' --negative 'Skip' \
+        'Enable the Chaotic-AUR repository? (requires Internet)'; then
+        INSTALL_CHAOTIC_AUR=true
+    fi
+    NCT_LABEL=No
+    [[ "$INSTALL_NCT6687D" == true ]] && NCT_LABEL=Yes
+    CHAOTIC_LABEL=No
+    [[ "$INSTALL_CHAOTIC_AUR" == true ]] && CHAOTIC_LABEL=Yes
+    banner 'Summary'
+    SUMMARY=$(printf 'User:       %s\nHostname:   %s\nDrive:      %s\nTimezone:   %s\nAUR helper: %s\nNCT6687D:   %s\nChaotic-AUR: %s' \
+        "$NEW_USER" "$HOSTNAME" "$DISK" "$TIMEZONE" "$AUR_HELPER" \
+        "$NCT_LABEL" "$CHAOTIC_LABEL")
+    gum style --foreground "$FG" --border rounded --padding '1 2' "$SUMMARY"
+    if ! gum confirm --default=false --affirmative 'Wipe and install' --negative 'Cancel' \
+        "This will completely wipe $DISK. Proceed?"; then
+        warn 'Installation aborted by user.'
+        exit 0
+    fi
 fi
-case "$AUR_HELPER" in
-    yay) AUR_HELPER_PACKAGE=yay ;;
-    paru) AUR_HELPER_PACKAGE=paru ;;
-    pikaur) AUR_HELPER_PACKAGE=pikaur-git ;;
-esac
-ok "AUR helper: $AUR_HELPER"
 
-INSTALL_NCT6687D=false
-if [[ -d "$DOTFILES_SOURCE_DIR/nct6687d" ]]; then
-    INSTALL_NCT6687D=true
-    ok 'NCT6687D source is bundled; the DKMS driver will be installed.'
-elif gum confirm --affirmative 'Install' --negative 'Skip' \
-    'Install the NCT6687D DKMS driver? (requires Internet)'; then
-    INSTALL_NCT6687D=true
-fi
 NCT_BUILD_PACKAGES=()
-if [[ "$INSTALL_NCT6687D" == true ]]; then
-    NCT_BUILD_PACKAGES=(dkms base-devel)
-fi
+if [[ "$INSTALL_NCT6687D" == true ]]; then NCT_BUILD_PACKAGES=(dkms base-devel); fi
 
-INSTALL_CHAOTIC_AUR=false
-if gum confirm --affirmative 'Enable' --negative 'Skip' \
-    'Enable the Chaotic-AUR repository? (requires Internet)'; then
-    INSTALL_CHAOTIC_AUR=true
-fi
-
-NCT_LABEL=No
-if [[ "$INSTALL_NCT6687D" == true ]]; then NCT_LABEL=Yes; fi
-CHAOTIC_LABEL=No
-if [[ "$INSTALL_CHAOTIC_AUR" == true ]]; then CHAOTIC_LABEL=Yes; fi
-
-banner 'Summary'
-SUMMARY=$(printf 'User:       %s\nHostname:   %s\nDrive:      %s\nTimezone:   %s\nAUR helper: %s\nNCT6687D:   %s\nChaotic-AUR: %s' \
-    "$NEW_USER" "$HOSTNAME" "$DISK" "$TIMEZONE" "$AUR_HELPER" \
-    "$NCT_LABEL" "$CHAOTIC_LABEL")
-gum style --foreground "$FG" --border rounded --padding '1 2' "$SUMMARY"
-if [[ "$INSTALL_CHAOTIC_AUR" == true ]]; then
-    gum style --foreground "$YELLOW" '⚠ Chaotic-AUR setup requires a working Internet connection.'
-fi
-if [[ "$INSTALL_NCT6687D" == true && ! -d "$DOTFILES_SOURCE_DIR/nct6687d" ]]; then
-    gum style --foreground "$YELLOW" '⚠ The NCT6687D source will be cloned from GitHub (Internet required).'
-fi
-if ! gum confirm --default=false --affirmative 'Wipe and install' --negative 'Cancel' \
-    "This will completely wipe $DISK. Proceed?"; then
-    gum style --foreground "$YELLOW" 'Installation aborted by user.'
-    exit 0
+if [[ "$DISK" == *"nvme"* ]] || [[ "$DISK" == *"mmcblk"* ]]; then
+    EFI_PART="${DISK}p1"; ROOT_PART="${DISK}p2"
+else
+    EFI_PART="${DISK}1"; ROOT_PART="${DISK}2"
 fi
 
 # --- DISK PARTITIONING & FORMATTING ---
@@ -264,8 +311,7 @@ EOF
 ok 'Offline repository configuration written'
 
 # --- PACSTRAP SEQUENCE ---
-if ! gum spin --spinner dot --show-error \
-    --title 'Installing packages from the offline repository...' -- \
+if ! run_progress 'Installing packages from the offline repository' \
     pacstrap -C "$PACMAN_CONF_FILE" -K /mnt \
     base linux-zen linux-zen-headers linux-firmware linux-firmware-amdgpu btrfs-progs grub efibootmgr networkmanager nano sudo git \
     "${NCT_BUILD_PACKAGES[@]}" \
@@ -275,7 +321,7 @@ if ! gum spin --spinner dot --show-error \
     awww blueman bluez bluez-utils coolercontrol coolercontrold eza fastfetch hypridle hyprlock \
     hyprpicker hyprsunset mesa-utils nautilus neovim npm nwg-look python-gobject \
     qt5-graphicaleffects qt5-imageformats qt5-multimedia qt5-quickcontrols2 qt5-quickcontrols qt5-svg \
-    qt6-5compat qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg quickshell \
+    qt6-5compat qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg \
     ttf-jetbrains-mono-nerd vlc vlc-plugins-all xdg-terminal-exec yt-dlp zsh-autocomplete \
     zsh-autosuggestions zsh-syntax-highlighting wl-clipboard arch-update goverlay-git \
     gradience-git grim-git gtk2 hyprmon-bin hyprscratch kvantum-qt6-git nautilus-admin-gtk4 \
@@ -285,7 +331,9 @@ if ! gum spin --spinner dot --show-error \
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
     arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa \
     xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet qt5ct qt6ct \
-    gcc chromium "$AUR_HELPER_PACKAGE"; then
+    chromium liquidctl libqalculate cava aubio brightnessctl power-profiles-daemon fish \
+    gcc ddcutil swappy qt6-imageformats lm_sensors pipewire wl-clipboard quickshell \
+    "$AUR_HELPER_PACKAGE"; then
     fail 'Offline package installation failed. See the output above.'
     exit 1
 fi
@@ -383,11 +431,12 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         make_scripts_executable "$DOTFILES_DIR"
         mkdir -p /usr/local/bin
         stow --restow --dir="$DOTFILES_DIR" --target=/usr/local scripts
-        sudo stow -t / coolercontrol
+        stow --restow --dir="$DOTFILES_DIR" --target=/ coolercontrol
         runuser -u "$NEW_USER" -- stow --restow --dir="$DOTFILES_DIR" \
             --target="/home/$NEW_USER" \
             bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
             kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh
+
         find -L /usr/local/bin -maxdepth 1 -type f -exec chmod a+x {} +
         install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/themes"
         install -o "$NEW_USER" -g "$NEW_USER" -m 0755 \
@@ -540,8 +589,7 @@ MKINIT
         grub-mkconfig -o /boot/grub/grub.cfg
 CHROOT_SCRIPT_EOF
 chmod 700 "$CHROOT_SCRIPT"
-if ! gum spin --spinner dot --show-error \
-    --title 'Configuring the installed system...' -- \
+if ! run_progress 'Configuring the installed system' \
     arch-chroot /mnt /bin/bash /root/anarchy-offline-setup.sh; then
     fail 'System configuration failed. See the output above.'
     exit 1
@@ -576,8 +624,7 @@ if (( missing_sync_dbs == 0 )); then
 elif (( seeded_sync_dbs == missing_sync_dbs )); then
     ok 'Seeded core, extra and multilib databases for first boot'
 else
-    gum style --foreground "$YELLOW" \
-        "Only $seeded_sync_dbs of $missing_sync_dbs official sync databases were bundled; run 'pacman -Sy' after first boot."
+    warn "Only $seeded_sync_dbs of $missing_sync_dbs official sync databases were bundled; run 'pacman -Sy' after first boot."
 fi
 
 step 'Unmounting target filesystems'
@@ -588,7 +635,7 @@ fi
 ok 'Target filesystems unmounted'
 
 banner 'Installation Complete'
-gum style --foreground "$FG" --border rounded --padding '1 2' \
-    '🎉 Strict offline system installation complete.
-Power down the device, remove the live USB, and reboot.
-After boot, check CoolerControl with: systemctl status coolercontrold'
+ok 'Strict offline system installation complete.'
+printf '%s\n' \
+    'Power down the device, remove the live USB, and reboot.' \
+    'After boot, check CoolerControl with: systemctl status coolercontrold'
