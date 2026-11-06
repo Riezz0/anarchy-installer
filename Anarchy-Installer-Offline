@@ -332,7 +332,7 @@ if ! run_progress 'Installing packages from the offline repository' \
     arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa \
     xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet qt5ct qt6ct \
     chromium liquidctl libqalculate cava aubio brightnessctl power-profiles-daemon fish \
-    gcc ddcutil swappy qt6-imageformats lm_sensors pipewire cliphist wl-clipboard quickshell \
+    gcc ddcutil swappy qt6-imageformats lm_sensors pipewire wl-clipboard quickshell \
     "$AUR_HELPER_PACKAGE"; then
     fail 'Offline package installation failed. See the output above.'
     exit 1
