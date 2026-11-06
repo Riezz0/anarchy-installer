@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import pwd
+import json
 import re
 import shutil
 import subprocess
@@ -88,6 +89,91 @@ BACKEND_CANDIDATES = (
     Path(__file__).resolve().with_name("Anarchy-Installer-Offline"),
     Path("/usr/local/bin/Anarchy-Installer-Offline"),
 )
+
+FALLBACK_PYWAL = {
+    "background": "#161821",
+    "foreground": "#c0caf5",
+    "color0": "#1f2330",
+    "color1": "#f7768e",
+    "color2": "#9ece6a",
+    "color3": "#e0af68",
+    "color4": "#7aa2f7",
+    "color5": "#bb9af7",
+    "color6": "#7dcfff",
+    "color7": "#a9b1d6",
+    "color8": "#414868",
+}
+
+
+def load_pywal_palette(home: Path | None = None) -> dict[str, str]:
+    """Load pywal colors from ~/.cache/wal, with a safe built-in fallback."""
+    cache_dir = (home or Path.home()) / ".cache" / "wal"
+    special: dict[str, str] = {}
+    colors: dict[str, str] = {}
+    color_pattern = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+    try:
+        data = json.loads((cache_dir / "colors.json").read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            raw_special = data.get("special", {})
+            raw_colors = data.get("colors", {})
+            if isinstance(raw_special, dict):
+                special = raw_special
+            if isinstance(raw_colors, dict):
+                colors = raw_colors
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    # pywal's plain colors file is a useful fallback for older cache formats.
+    if not colors:
+        try:
+            lines = (cache_dir / "colors").read_text(encoding="utf-8").splitlines()
+            if len(lines) >= 16 and all(color_pattern.fullmatch(line.strip()) for line in lines[:16]):
+                colors = {f"color{index}": line.strip() for index, line in enumerate(lines[:16])}
+        except OSError:
+            pass
+
+    def color(value: object, fallback: str) -> str:
+        return value if isinstance(value, str) and color_pattern.fullmatch(value) else fallback
+
+    background = color(
+        special.get("background"),
+        color(colors.get("color0"), FALLBACK_PYWAL["background"]),
+    )
+    foreground = color(
+        special.get("foreground"),
+        color(colors.get("color7"), FALLBACK_PYWAL["foreground"]),
+    )
+    palette = {
+        "background": background,
+        "foreground": foreground,
+    }
+    for index in range(9):
+        key = f"color{index}"
+        palette[key] = color(colors.get(key), FALLBACK_PYWAL.get(key, foreground))
+    return palette
+
+
+def blend_colors(base: str, accent: str, amount: float) -> str:
+    """Mix two #RRGGBB colors for layered surfaces that follow pywal."""
+    base_rgb = tuple(int(base[index : index + 2], 16) for index in (1, 3, 5))
+    accent_rgb = tuple(int(accent[index : index + 2], 16) for index in (1, 3, 5))
+    mixed = tuple(round(a * (1 - amount) + b * amount) for a, b in zip(base_rgb, accent_rgb))
+    return "#" + "".join(f"{channel:02x}" for channel in mixed)
+
+
+def color_luminance(value: str) -> float:
+    """Return relative luminance for a validated hex color."""
+    channels = [int(value[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+    linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def contrasting_text(fill: str, light: str, dark: str) -> str:
+    """Pick the pywal foreground/background with better contrast on a fill."""
+    return dark if color_luminance(fill) > 0.5 else light
+
+
 def run_capture(command: list[str]) -> str:
     """Run a non-interactive discovery command and return its output."""
     try:
@@ -168,7 +254,11 @@ class OfflineInstaller(Gtk.Application):
         self.review_label: Gtk.Label | None = None
         self.log_buffer: Gtk.TextBuffer | None = None
         self.progress_label: Gtk.Label | None = None
-        self.spinner: Gtk.Spinner | None = None
+        self.activity_label: Gtk.Label | None = None
+        self.progress_bar: Gtk.ProgressBar | None = None
+        self.log_expander: Gtk.Expander | None = None
+        self.phase_rows: list[tuple[Gtk.Box, Gtk.Label, Gtk.Label]] = []
+        self.current_phase = 0
         self.config_path: Path | None = None
         self.install_started = False
         self.install_finished = False
@@ -187,39 +277,60 @@ class OfflineInstaller(Gtk.Application):
         display = Gdk.Display.get_default()
         if display is None:
             return
+        wal = load_pywal_palette()
+        background = wal["background"]
+        foreground = wal["foreground"]
+        panel = blend_colors(background, wal["color8"], 0.22)
+        panel_alt = blend_colors(background, wal["color8"], 0.48)
+        border = blend_colors(background, wal["color8"], 0.82)
+        muted = blend_colors(foreground, background, 0.4)
+        warning_panel = blend_colors(background, wal["color3"], 0.18)
+        accent_text = contrasting_text(wal["color4"], foreground, background)
+        success_text = contrasting_text(wal["color2"], foreground, background)
+        danger_text = contrasting_text(wal["color1"], foreground, background)
         provider = Gtk.CssProvider()
-        provider.load_from_data(
-            b"""
-            window { background-color: #161821; color: #c0caf5; }
-            .app-shell { background-color: #161821; }
-            .topbar { background-color: #1a1d27; border-bottom: 1px solid #30364a; padding: 18px 26px; }
-            .brand-mark { background: #292e42; border-radius: 14px; color: #bb9af7; padding: 11px; font-size: 20px; font-weight: 800; }
-            .brand-title { color: #c0caf5; font-size: 19px; font-weight: 750; }
-            .brand-subtitle, .muted { color: #7982a9; }
-            .content { padding: 28px; }
-            .hero { color: #c0caf5; font-size: 27px; font-weight: 800; }
-            .description { color: #9aa4c7; font-size: 14px; }
-            .card { background-color: #1f2330; border: 1px solid #30364a; border-radius: 16px; padding: 20px; }
-            .card-title { color: #c0caf5; font-size: 16px; font-weight: 700; }
-            .field-label { color: #a9b1d6; font-weight: 650; }
-            entry, dropdown, spinbutton { background-color: #292e42; color: #c0caf5; border: 1px solid #414868; border-radius: 9px; min-height: 38px; }
-            entry:focus, dropdown:focus { border-color: #7aa2f7; }
-            checkbutton { color: #c0caf5; }
-            .warning-card { background-color: #30291f; border: 1px solid #6b5430; border-radius: 12px; padding: 15px; }
-            .warning-text { color: #e0af68; }
-            .step-number { background-color: #292e42; border-radius: 999px; color: #7982a9; min-width: 30px; min-height: 30px; padding: 5px; font-weight: 700; }
-            .step-active { background-color: #7aa2f7; color: #161821; }
-            .step-done { background-color: #9ece6a; color: #161821; }
-            .sidebar { background-color: #1a1d27; border-right: 1px solid #30364a; padding: 23px 15px; }
-            .footer { background-color: #1a1d27; border-top: 1px solid #30364a; padding: 15px 24px; }
-            button { border-radius: 10px; padding: 9px 16px; font-weight: 650; }
-            button.suggested-action { background-color: #7aa2f7; color: #161821; }
-            button.destructive-action { background-color: #f7768e; color: #161821; }
-            .log-view { background-color: #101219; color: #c0caf5; font-family: monospace; font-size: 12px; padding: 12px; }
-            .success-title { color: #9ece6a; font-size: 26px; font-weight: 800; }
-            .error-title { color: #f7768e; font-size: 26px; font-weight: 800; }
-            """
-        )
+        css = f"""
+            window {{ background-color: {background}; color: {foreground}; }}
+            .app-shell {{ background-color: {background}; }}
+            .topbar {{ background-color: {panel}; border-bottom: 1px solid {border}; padding: 18px 26px; }}
+            .brand-mark {{ background-color: {panel_alt}; border-radius: 14px; color: {wal['color5']}; padding: 11px; font-size: 20px; font-weight: 800; }}
+            .brand-title {{ color: {foreground}; font-size: 19px; font-weight: 750; }}
+            .brand-subtitle, .muted {{ color: {muted}; }}
+            .content {{ padding: 28px; }}
+            .hero {{ color: {foreground}; font-size: 27px; font-weight: 800; }}
+            .description {{ color: {muted}; font-size: 14px; }}
+            .card {{ background-color: {panel}; border: 1px solid {border}; border-radius: 16px; padding: 20px; }}
+            .card-title {{ color: {foreground}; font-size: 16px; font-weight: 700; }}
+            .field-label {{ color: {wal['color7']}; font-weight: 650; }}
+            entry, dropdown, spinbutton {{ background-color: {panel_alt}; color: {foreground}; border: 1px solid {border}; border-radius: 9px; min-height: 38px; }}
+            entry:focus, dropdown:focus {{ border-color: {wal['color4']}; }}
+            checkbutton {{ color: {foreground}; }}
+            .warning-card {{ background-color: {warning_panel}; border: 1px solid {wal['color3']}; border-radius: 12px; padding: 15px; }}
+            .warning-text {{ color: {wal['color3']}; }}
+            .step-number {{ background-color: {panel_alt}; border-radius: 999px; color: {muted}; min-width: 30px; min-height: 30px; padding: 5px; font-weight: 700; }}
+            .step-active {{ background-color: {wal['color4']}; color: {accent_text}; }}
+            .step-done {{ background-color: {wal['color2']}; color: {success_text}; }}
+            .sidebar {{ background-color: {panel}; border-right: 1px solid {border}; padding: 23px 15px; }}
+            .footer {{ background-color: {panel}; border-top: 1px solid {border}; padding: 15px 24px; }}
+            button {{ border-radius: 10px; padding: 9px 16px; font-weight: 650; }}
+            button.suggested-action {{ background-color: {wal['color4']}; color: {accent_text}; }}
+            button.destructive-action {{ background-color: {wal['color1']}; color: {danger_text}; }}
+            .log-view {{ background-color: {blend_colors(background, '#000000', 0.3)}; color: {foreground}; font-family: monospace; font-size: 12px; padding: 12px; }}
+            .phase-list {{ background-color: {panel}; border: 1px solid {border}; border-radius: 16px; padding: 10px 18px; }}
+            .phase-row {{ padding: 10px 2px; }}
+            .phase-indicator {{ color: {muted}; font-size: 17px; font-weight: 800; min-width: 24px; }}
+            .phase-active .phase-indicator {{ color: {wal['color4']}; }}
+            .phase-done .phase-indicator {{ color: {wal['color2']}; }}
+            .phase-title {{ color: {muted}; font-size: 14px; }}
+            .phase-active .phase-title {{ color: {foreground}; font-weight: 700; }}
+            .phase-done .phase-title {{ color: {foreground}; }}
+            progressbar trough {{ background-color: {panel_alt}; border-radius: 99px; min-height: 8px; }}
+            progressbar progress {{ background-color: {wal['color4']}; border-radius: 99px; min-height: 8px; }}
+            expander > title {{ color: {muted}; padding: 8px 2px; }}
+            .success-title {{ color: {wal['color2']}; font-size: 26px; font-weight: 800; }}
+            .error-title {{ color: {wal['color1']}; font-size: 26px; font-weight: 800; }}
+        """
+        provider.load_from_data(css.encode("utf-8"))
         Gtk.StyleContext.add_provider_for_display(
             display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
@@ -471,15 +582,42 @@ class OfflineInstaller(Gtk.Application):
 
     def _build_progress_page(self) -> Gtk.Widget:
         page = self._page_box()
-        self.progress_label = self._label("Preparing installation…", "card-title")
+        self.progress_label = self._label("Installing Anarchy…", "hero")
         page.append(self.progress_label)
-        self.spinner = Gtk.Spinner()
-        self.spinner.set_spinning(True)
-        page.append(self.spinner)
+
+        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar.set_show_text(True)
+        page.append(self.progress_bar)
+
+        phase_titles = (
+            "Prepare the drive and create Btrfs filesystems",
+            "Install the offline system packages",
+            "Configure the system and desktop",
+            "Finish up and safely unmount",
+        )
+        phase_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        phase_list.add_css_class("phase-list")
+        self.phase_rows.clear()
+        for phase_title in phase_titles:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            row.add_css_class("phase-row")
+            indicator = self._label("○", "phase-indicator")
+            indicator.set_xalign(0.5)
+            title = self._label(phase_title, "phase-title")
+            title.set_hexpand(True)
+            row.append(indicator)
+            row.append(title)
+            phase_list.append(row)
+            self.phase_rows.append((row, indicator, title))
+        page.append(phase_list)
+
+        self.activity_label = self._label("Preparing the installer…", "muted")
+        page.append(self.activity_label)
+
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_hexpand(True)
-        scroll.set_min_content_height(310)
+        scroll.set_min_content_height(210)
         text_view = Gtk.TextView()
         text_view.set_editable(False)
         text_view.set_cursor_visible(False)
@@ -487,7 +625,11 @@ class OfflineInstaller(Gtk.Application):
         text_view.add_css_class("log-view")
         self.log_buffer = text_view.get_buffer()
         scroll.set_child(text_view)
-        page.append(scroll)
+        self.log_expander = Gtk.Expander(label="Show detailed output")
+        self.log_expander.set_expanded(False)
+        self.log_expander.set_child(scroll)
+        page.append(self.log_expander)
+        self._update_phase(0, "Preparing the target drive…")
         return page
 
     def _page_box(self) -> Gtk.Box:
@@ -742,17 +884,16 @@ class OfflineInstaller(Gtk.Application):
         self.install_started = True
         if self.next_button:
             self.next_button.set_visible(False)
-        if self.spinner:
-            self.spinner.start()
         assert self.log_buffer is not None
-        self.log_buffer.set_text("Starting the installer…\n")
+        self.log_buffer.set_text("")
+        self._update_phase(0, "Starting the installer…")
         threading.Thread(
             target=self._run_installer,
             args=(command, sudo_password),
             daemon=True,
         ).start()
 
-    def _run_installer(self, command: list[str], sudo_password: str) -> None:
+    def _run_installer(self, command: list[str], sudo_password: str | None) -> None:
         process: subprocess.Popen[str] | None = None
         try:
             process = subprocess.Popen(
@@ -780,18 +921,47 @@ class OfflineInstaller(Gtk.Application):
 
     def _append_log(self, line: str) -> bool:
         if line.startswith("ANARCHY_STEP:"):
-            if self.progress_label:
-                self.progress_label.set_text(line.removeprefix("ANARCHY_STEP:"))
+            title = line.removeprefix("ANARCHY_STEP:")
+            if title.startswith(("Partitioning", "Formatting", "Creating Btrfs", "Mounting target")):
+                self._update_phase(0, title)
+            elif title.startswith(("Configuring strict offline", "Installing packages", "Generating fstab")):
+                self._update_phase(1, title)
+            elif title.startswith("Configuring the installed system"):
+                self._update_phase(2, title)
+            elif title.startswith(("Seeding official", "Unmounting target")):
+                self._update_phase(3, title)
             return GLib.SOURCE_REMOVE
         if self.log_buffer is not None:
             end = self.log_buffer.get_end_iter()
             self.log_buffer.insert(end, line + "\n")
+        if self.activity_label and re.search(r"(error|failed|fatal):", line, re.IGNORECASE):
+            self.activity_label.set_text("An issue was reported. Open detailed output for the full message.")
+            self.activity_label.add_css_class("warning-text")
         return GLib.SOURCE_REMOVE
+
+    def _update_phase(self, phase: int, activity: str) -> None:
+        """Update the high-level install checklist and progress indicator."""
+        self.current_phase = max(0, min(phase, len(self.phase_rows) - 1))
+        for index, (row, indicator, _title) in enumerate(self.phase_rows):
+            row.remove_css_class("phase-active")
+            row.remove_css_class("phase-done")
+            if index < self.current_phase:
+                row.add_css_class("phase-done")
+                indicator.set_text("✓")
+            elif index == self.current_phase:
+                row.add_css_class("phase-active")
+                indicator.set_text("●")
+            else:
+                indicator.set_text("○")
+        if self.progress_bar:
+            self.progress_bar.set_fraction((self.current_phase + 0.35) / 4)
+            self.progress_bar.set_text(f"STEP {self.current_phase + 1} OF 4")
+        if self.activity_label:
+            self.activity_label.set_text(activity)
+            self.activity_label.remove_css_class("warning-text")
 
     def _finish_install(self, return_code: int) -> bool:
         self.install_finished = True
-        if self.spinner:
-            self.spinner.stop()
         if self.progress_label:
             self.progress_label.set_text(
                 "Installation complete — you can reboot now."
@@ -800,6 +970,25 @@ class OfflineInstaller(Gtk.Application):
             )
             self.progress_label.remove_css_class("card-title")
             self.progress_label.add_css_class("success-title" if return_code == 0 else "error-title")
+        if return_code == 0:
+            for _row, indicator, _title in self.phase_rows:
+                indicator.set_text("✓")
+            for row, _indicator, _title in self.phase_rows:
+                row.remove_css_class("phase-active")
+                row.add_css_class("phase-done")
+            if self.progress_bar:
+                self.progress_bar.set_fraction(1.0)
+                self.progress_bar.set_text("COMPLETE")
+            if self.activity_label:
+                self.activity_label.set_text("Your system is installed. You can reboot when ready.")
+        else:
+            if self.progress_bar:
+                self.progress_bar.set_text("INSTALLATION NEEDS ATTENTION")
+            if self.activity_label:
+                self.activity_label.set_text("The install stopped. Expand detailed output to inspect the error.")
+                self.activity_label.add_css_class("warning-text")
+            if self.log_expander:
+                self.log_expander.set_expanded(True)
         if self.page_counter:
             self.page_counter.set_text("COMPLETE" if return_code == 0 else "NEEDS ATTENTION")
         if self.back_button:
@@ -809,12 +998,6 @@ class OfflineInstaller(Gtk.Application):
             self.next_button.set_label("Close")
             self.next_button.set_sensitive(True)
             self.next_button.remove_css_class("suggested-action")
-        if self.log_buffer is not None and return_code == 0:
-            end = self.log_buffer.get_end_iter()
-            self.log_buffer.insert(
-                end,
-                "\nInstallation completed. You may close this window and reboot.\n",
-            )
         return GLib.SOURCE_REMOVE
 
     def _on_close_request(self, _window: Gtk.Window) -> bool:

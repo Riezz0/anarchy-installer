@@ -128,7 +128,7 @@ for required_path in \
     sys/grub/grub sys/grub/tokyo-night sys/sddm/anarchy-sddm \
     sys/sddm/sddm.conf sys/sddm/initial-setup sys/fonts \
     scripts bg coolercontrol/etc/coolercontrol/config.toml cursors cursors/.local/share/icons fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
-    kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh; do
+    kvantum neovim omz pywal qt5 qt6 quickshell quickshell/.config/quickshell/Anarchy-Shell/CMakeLists.txt rofi themes wal xkb zsh; do
     if [[ ! -e "$DOTFILES_SOURCE_DIR/$required_path" ]]; then
         fail "Required dotfiles path is missing: $DOTFILES_SOURCE_DIR/$required_path"
         exit 1
@@ -321,7 +321,7 @@ if ! run_progress 'Installing packages from the offline repository' \
     awww blueman bluez bluez-utils coolercontrol coolercontrold eza fastfetch hypridle hyprlock \
     hyprpicker hyprsunset mesa-utils nautilus neovim npm nwg-look python-gobject \
     qt5-graphicaleffects qt5-imageformats qt5-multimedia qt5-quickcontrols2 qt5-quickcontrols qt5-svg \
-    qt6-5compat qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg quickshell \
+    qt6-5compat qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg quickshell quickshell-git \
     ttf-jetbrains-mono-nerd vlc vlc-plugins-all xdg-terminal-exec yt-dlp zsh-autocomplete \
     zsh-autosuggestions zsh-syntax-highlighting wl-clipboard arch-update goverlay-git \
     gradience-git grim-git gtk2 hyprmon-bin hyprscratch kvantum-qt6-git nautilus-admin-gtk4 \
@@ -329,9 +329,12 @@ if ! run_progress 'Installing packages from the offline repository' \
     python-libsass python-material-color-utilities python-pywal16 python-pywalfox python-yapsy-git \
     qt5-styleplugins slurp-git vesktop-bin ttf-font-awesome-4 ttf-font-awesome-5 vkbasalt \
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
-    arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa \
+    arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa 
     xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet qt5ct qt6ct \
-    gcc chromium "$AUR_HELPER_PACKAGE"; then
+    gcc chromium liquidctl ninja libqalculate libcava cava aubio brightnessctl power-profiles-daemon fish \ 
+    cmake gcc pkgconf qt6-shadertools qt6 modules ddcutil swappy qt6-imageformats lm_sensors pipewire cliphist \ 
+    wl-clipboard libcava\
+    "$AUR_HELPER_PACKAGE"; then
     fail 'Offline package installation failed. See the output above.'
     exit 1
 fi
@@ -434,6 +437,42 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
             --target="/home/$NEW_USER" \
             bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
             kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh
+
+        # Build and install the custom Caelestia QML modules required by
+        # Anarchy-Shell. Keep the build cache outside the dotfiles tree; the
+        # launcher loads the installed modules from ~/.local/lib.
+        SHELL_SOURCE="$DOTFILES_DIR/quickshell/.config/quickshell/Anarchy-Shell"
+        SHELL_BUILD_DIR="/home/$NEW_USER/.cache/anarchy-shell-build"
+        SHELL_PREFIX="/home/$NEW_USER/.local"
+        SHELL_VERSION=$(git -C "$SHELL_SOURCE" describe --tags --abbrev=0 2>/dev/null || true)
+        SHELL_VERSION=${SHELL_VERSION#v}
+        SHELL_VERSION=${SHELL_VERSION:-1.3.0}
+        SHELL_REVISION=$(git -C "$SHELL_SOURCE" rev-parse HEAD 2>/dev/null || true)
+        SHELL_REVISION=${SHELL_REVISION:-offline-installer}
+        SHELL_PKG_CONFIG_PATH="$SHELL_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+        install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.cache" "$SHELL_BUILD_DIR" "$SHELL_PREFIX"
+        echo 'Building Anarchy-Shell QML modules...'
+        runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" PKG_CONFIG_PATH="$SHELL_PKG_CONFIG_PATH" cmake \
+            -S "$SHELL_SOURCE" -B "$SHELL_BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_INSTALL_PREFIX="$SHELL_PREFIX" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DDISTRIBUTOR=anarchy-installer-offline \
+            -DENABLE_MODULES=plugin \
+            -DINSTALL_LIBDIR=lib \
+            -DINSTALL_QMLDIR=lib/qt6/qml \
+            -DCAELESTIA_TEST_TRS=ON \
+            -DVERSION="$SHELL_VERSION" \
+            -DGIT_REVISION="$SHELL_REVISION"
+        SHELL_BUILD_JOBS=$(nproc)
+        (( SHELL_BUILD_JOBS > 4 )) && SHELL_BUILD_JOBS=4
+        runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" cmake \
+            --build "$SHELL_BUILD_DIR" --parallel "$SHELL_BUILD_JOBS"
+        runuser -u "$NEW_USER" -- env HOME="/home/$NEW_USER" cmake \
+            --install "$SHELL_BUILD_DIR" --prefix "$SHELL_PREFIX"
+        echo 'Anarchy-Shell QML modules installed to the user-local Qt import path.'
+
         find -L /usr/local/bin -maxdepth 1 -type f -exec chmod a+x {} +
         install -d -o "$NEW_USER" -g "$NEW_USER" "/home/$NEW_USER/.local/share/themes"
         install -o "$NEW_USER" -g "$NEW_USER" -m 0755 \
