@@ -434,7 +434,7 @@ DOTFILES_DIR="/home/$NEW_USER/anarchydots"
         stow --restow --dir="$DOTFILES_DIR" --target=/ coolercontrol
         runuser -u "$NEW_USER" -- stow --restow --dir="$DOTFILES_DIR" \
             --target="/home/$NEW_USER" \
-            bg cursors fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
+            bg cursors face fastfetch gradience gtk3 gtk4 hypr-themes hyprland icons kitty \
             kvantum neovim omz pywal qt5 qt6 quickshell rofi themes wal xkb zsh
 
         find -L /usr/local/bin -maxdepth 1 -type f -exec chmod a+x {} +
