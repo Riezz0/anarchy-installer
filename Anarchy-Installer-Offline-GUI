@@ -236,6 +236,7 @@ class OfflineInstaller(Gtk.Application):
         self.page_counter: Gtk.Label | None = None
         self.back_button: Gtk.Button | None = None
         self.next_button: Gtk.Button | None = None
+        self.reboot_button: Gtk.Button | None = None
         self.step_labels: list[Gtk.Label] = []
         self.current_page = 0
         self.disks = available_disks()
@@ -293,11 +294,24 @@ class OfflineInstaller(Gtk.Application):
         accent_text = contrasting_text(wal["color4"], foreground, background)
         success_text = contrasting_text(wal["color2"], foreground, background)
         danger_text = contrasting_text(wal["color1"], foreground, background)
+        button_bg = panel_alt
+        button_hover = blend_colors(panel_alt, foreground, 0.12)
+        button_active = blend_colors(panel_alt, foreground, 0.22)
+        accent_hover = blend_colors(wal["color4"], foreground, 0.16)
+        accent_active = blend_colors(wal["color4"], background, 0.18)
+        danger_hover = blend_colors(wal["color1"], foreground, 0.16)
+        danger_active = blend_colors(wal["color1"], background, 0.18)
+        disabled_button = blend_colors(background, wal["color8"], 0.35)
+        scrollbar_bg = blend_colors(background, wal["color8"], 0.3)
+        scrollbar_slider = blend_colors(background, foreground, 0.45)
+        log_background = blend_colors(background, wal["color0"], 0.55)
         self.brand_accent = wal["color4"]
         self.brand_foreground = foreground
         provider = Gtk.CssProvider()
         css = f"""
-            window {{ background-color: {background}; color: {foreground}; }}
+            window, window.dialog, .background {{ background-color: {background}; color: {foreground}; }}
+            headerbar, .titlebar {{ background-color: {panel}; background-image: none; color: {foreground}; box-shadow: none; border-bottom: 1px solid {border}; }}
+            label.heading, label.title {{ color: {foreground}; }}
             .app-shell {{ background-color: {background}; }}
             .topbar {{ background-color: {panel}; border-bottom: 1px solid {border}; padding: 18px 26px; }}
             .brand-logo {{ background-color: {panel_alt}; border-radius: 14px; }}
@@ -309,9 +323,19 @@ class OfflineInstaller(Gtk.Application):
             .card {{ background-color: {panel}; border: 1px solid {border}; border-radius: 16px; padding: 20px; }}
             .card-title {{ color: {foreground}; font-size: 16px; font-weight: 700; }}
             .field-label {{ color: {wal['color7']}; font-weight: 650; }}
-            entry, dropdown, spinbutton {{ background-color: {panel_alt}; color: {foreground}; border: 1px solid {border}; border-radius: 9px; min-height: 38px; }}
-            entry:focus, dropdown:focus {{ border-color: {wal['color4']}; }}
+            entry, dropdown, spinbutton {{ background-color: {panel_alt}; background-image: none; color: {foreground}; border: 1px solid {border}; border-radius: 9px; min-height: 38px; }}
+            entry {{ caret-color: {wal['color4']}; }}
+            entry > text > placeholder {{ color: {muted}; }}
+            entry:focus, entry:focus-within, dropdown:focus, dropdown:focus-within, spinbutton:focus {{ border-color: {wal['color4']}; }}
+            entry:disabled, dropdown:disabled, spinbutton:disabled {{ color: {muted}; background-color: {disabled_button}; }}
+            selection, entry > text > selection, textview > text > selection {{ background-color: {wal['color4']}; color: {accent_text}; }}
+            dropdown > button {{ background-color: transparent; background-image: none; border-color: transparent; box-shadow: none; }}
+            dropdown > button:hover {{ background-color: {button_hover}; }}
+            dropdown > button:active {{ background-color: {button_active}; }}
             checkbutton {{ color: {foreground}; }}
+            checkbutton check {{ background-color: {panel_alt}; background-image: none; border: 1px solid {border}; border-radius: 4px; min-width: 18px; min-height: 18px; }}
+            checkbutton check:hover {{ border-color: {wal['color4']}; }}
+            checkbutton check:checked {{ background-color: {wal['color4']}; color: {accent_text}; border-color: {wal['color4']}; }}
             .warning-card {{ background-color: {warning_panel}; border: 1px solid {wal['color3']}; border-radius: 12px; padding: 15px; }}
             .warning-text {{ color: {wal['color3']}; }}
             .step-number {{ background-color: {panel_alt}; border-radius: 999px; color: {muted}; min-width: 30px; min-height: 30px; padding: 5px; font-weight: 700; }}
@@ -319,10 +343,33 @@ class OfflineInstaller(Gtk.Application):
             .step-done {{ background-color: {wal['color2']}; color: {success_text}; }}
             .sidebar {{ background-color: {panel}; border-right: 1px solid {border}; padding: 23px 15px; }}
             .footer {{ background-color: {panel}; border-top: 1px solid {border}; padding: 15px 24px; }}
-            button {{ border-radius: 10px; padding: 9px 16px; font-weight: 650; }}
-            button.suggested-action {{ background-color: {wal['color4']}; color: {accent_text}; }}
-            button.destructive-action {{ background-color: {wal['color1']}; color: {danger_text}; }}
-            .log-view {{ background-color: {blend_colors(background, '#000000', 0.3)}; color: {foreground}; font-family: monospace; font-size: 12px; padding: 12px; }}
+            button {{ background-color: {button_bg}; background-image: none; color: {foreground}; border: 1px solid {border}; border-radius: 10px; padding: 9px 16px; font-weight: 650; box-shadow: none; }}
+            button:hover {{ background-color: {button_hover}; }}
+            button:active, button:checked {{ background-color: {button_active}; }}
+            button:disabled {{ background-color: {disabled_button}; color: {muted}; border-color: {border}; }}
+            button.flat {{ background-color: transparent; border-color: transparent; }}
+            button.suggested-action {{ background-color: {wal['color4']}; color: {accent_text}; border-color: {wal['color4']}; }}
+            button.suggested-action:hover {{ background-color: {accent_hover}; border-color: {accent_hover}; }}
+            button.suggested-action:active {{ background-color: {accent_active}; border-color: {accent_active}; }}
+            button.suggested-action:disabled {{ background-color: {disabled_button}; color: {muted}; border-color: {border}; }}
+            button.destructive-action {{ background-color: {wal['color1']}; color: {danger_text}; border-color: {wal['color1']}; }}
+            button.destructive-action:hover {{ background-color: {danger_hover}; border-color: {danger_hover}; }}
+            button.destructive-action:active {{ background-color: {danger_active}; border-color: {danger_active}; }}
+            button.destructive-action:disabled {{ background-color: {disabled_button}; color: {muted}; border-color: {border}; }}
+            popover, popover.background, popover > contents {{ background-color: {panel}; background-image: none; color: {foreground}; }}
+            popover > contents {{ border: 1px solid {border}; border-radius: 12px; }}
+            popover listview {{ background-color: transparent; color: {foreground}; }}
+            popover row {{ color: {foreground}; }}
+            popover row:hover {{ background-color: {panel_alt}; }}
+            popover row:selected {{ background-color: {wal['color4']}; color: {accent_text}; }}
+            popover row:selected label {{ color: {accent_text}; }}
+            textview, textview > text {{ background-color: {log_background}; color: {foreground}; }}
+            .log-view {{ background-color: {log_background}; color: {foreground}; font-family: monospace; font-size: 12px; padding: 12px; }}
+            scrolledwindow, scrolledwindow > viewport {{ background-color: transparent; }}
+            scrollbar {{ background-color: transparent; border: none; }}
+            scrollbar trough {{ background-color: {scrollbar_bg}; background-image: none; border-radius: 999px; }}
+            scrollbar slider {{ background-color: {scrollbar_slider}; background-image: none; border-radius: 999px; min-width: 8px; min-height: 8px; }}
+            scrollbar slider:hover {{ background-color: {wal['color4']}; }}
             .phase-list {{ background-color: {panel}; border: 1px solid {border}; border-radius: 16px; padding: 10px 18px; }}
             .phase-row {{ padding: 10px 2px; }}
             .phase-indicator {{ color: {muted}; font-size: 17px; font-weight: 800; min-width: 24px; }}
@@ -331,9 +378,16 @@ class OfflineInstaller(Gtk.Application):
             .phase-title {{ color: {muted}; font-size: 14px; }}
             .phase-active .phase-title {{ color: {foreground}; font-weight: 700; }}
             .phase-done .phase-title {{ color: {foreground}; }}
-            progressbar trough {{ background-color: {panel_alt}; border-radius: 99px; min-height: 8px; }}
-            progressbar progress {{ background-color: {wal['color4']}; border-radius: 99px; min-height: 8px; }}
+            progressbar trough {{ background-color: {panel_alt}; background-image: none; border-radius: 99px; min-height: 8px; }}
+            progressbar progress {{ background-color: {wal['color4']}; background-image: none; border-radius: 99px; min-height: 8px; }}
+            progressbar text {{ color: {foreground}; font-weight: 700; }}
             expander > title {{ color: {muted}; padding: 8px 2px; }}
+            expander > title > arrow {{ color: {muted}; }}
+            separator {{ background-color: {border}; }}
+            tooltip, tooltip.background {{ background-color: {panel_alt}; background-image: none; color: {foreground}; border: 1px solid {border}; }}
+            tooltip label {{ color: {foreground}; }}
+            spinner {{ color: {wal['color4']}; }}
+            *:focus-visible {{ outline-color: {wal['color4']}; }}
             .success-title {{ color: {wal['color2']}; font-size: 26px; font-weight: 800; }}
             .error-title {{ color: {wal['color1']}; font-size: 26px; font-weight: 800; }}
         """
@@ -492,6 +546,11 @@ class OfflineInstaller(Gtk.Application):
         self.next_button.add_css_class("suggested-action")
         self.next_button.connect("clicked", self._on_next)
         footer.append(self.next_button)
+        self.reboot_button = Gtk.Button(label="Reboot now")
+        self.reboot_button.add_css_class("suggested-action")
+        self.reboot_button.set_visible(False)
+        self.reboot_button.connect("clicked", self._request_reboot)
+        footer.append(self.reboot_button)
         return footer
 
     def _build_welcome_page(self) -> Gtk.Widget:
@@ -767,6 +826,8 @@ class OfflineInstaller(Gtk.Application):
             }
             self.next_button.set_label(button_labels.get(page, "Continue  →"))
             self.next_button.set_sensitive(page < 4)
+        if self.reboot_button:
+            self.reboot_button.set_visible(False)
         for index, label in enumerate(self.step_labels):
             label.remove_css_class("step-active")
             label.remove_css_class("step-done")
@@ -824,6 +885,94 @@ class OfflineInstaller(Gtk.Application):
                 self._begin_install(None)
             else:
                 self._show_sudo_dialog()
+
+    def _request_reboot(self, _button: Gtk.Button) -> None:
+        assert self.window is not None
+        dialog = Gtk.AlertDialog(
+            message="Reboot into your new system?",
+            detail="Remove the installation media before the system restarts.",
+            buttons=["Cancel", "Reboot now"],
+            default_button=1,
+            cancel_button=0,
+        )
+        dialog.choose(self.window, None, self._confirm_reboot)
+
+    def _confirm_reboot(self, dialog: Gtk.AlertDialog, result: Gio.AsyncResult) -> None:
+        try:
+            response = dialog.choose_finish(result)
+        except GLib.Error:
+            return
+        if response != 1:
+            return
+        if os.geteuid() == 0 or self._sudo_is_ready():
+            self._reboot(None)
+        else:
+            self._show_reboot_sudo_dialog()
+
+    def _show_reboot_sudo_dialog(self) -> None:
+        assert self.window is not None
+        dialog = Gtk.Dialog(title="Authorize reboot", transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Reboot now", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        area = dialog.get_content_area()
+        area.set_spacing(12)
+        area.set_margin_top(18)
+        area.set_margin_bottom(18)
+        area.set_margin_start(20)
+        area.set_margin_end(20)
+        area.append(self._label("Enter your live-session password to reboot the system.", "description"))
+        password = self._password_entry("Live-session password")
+        area.append(password)
+
+        def response_handler(_dialog: Gtk.Dialog, response_id: int) -> None:
+            secret = password.get_text()
+            dialog.destroy()
+            if response_id == Gtk.ResponseType.OK and secret:
+                self._reboot(secret)
+
+        dialog.connect("response", response_handler)
+        dialog.present()
+
+    def _reboot(self, sudo_password: str | None) -> None:
+        if self.reboot_button:
+            self.reboot_button.set_sensitive(False)
+        if os.geteuid() == 0:
+            command = ["systemctl", "reboot"]
+        elif sudo_password is None:
+            command = ["sudo", "-n", "--", "systemctl", "reboot"]
+        else:
+            command = ["sudo", "-k", "-S", "--", "systemctl", "reboot"]
+
+        def run() -> None:
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE if sudo_password is not None else subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+                if process.stdin is not None:
+                    process.stdin.write(sudo_password + "\n")
+                    process.stdin.close()
+                return_code = process.wait()
+            except OSError as error:
+                GLib.idle_add(self._reboot_failed, str(error))
+                return
+            if return_code != 0:
+                GLib.idle_add(self._reboot_failed, "systemctl reboot exited with a non-zero status")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _reboot_failed(self, reason: str) -> bool:
+        if self.reboot_button:
+            self.reboot_button.set_sensitive(True)
+        if self.window is not None:
+            dialog = Gtk.AlertDialog(message="Could not reboot automatically.")
+            dialog.set_detail(f"{reason}. Reboot the system manually.")
+            dialog.show(self.window)
+        return GLib.SOURCE_REMOVE
 
     @staticmethod
     def _sudo_is_ready() -> bool:
@@ -1047,6 +1196,8 @@ class OfflineInstaller(Gtk.Application):
                 self.progress_bar.set_text("COMPLETE")
             if self.activity_label:
                 self.activity_label.set_text("Your system is installed. You can reboot when ready.")
+            if self.reboot_button:
+                self.reboot_button.set_visible(True)
         else:
             if self.progress_bar:
                 self.progress_bar.set_text("INSTALLATION NEEDS ATTENTION")

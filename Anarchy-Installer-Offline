@@ -337,7 +337,7 @@ PACSTRAP_PACKAGES=(
     chromium liquidctl quickshell-git glibc gcc-libs ddcutil brightnessctl libcava
     lm_sensors aubio libpipewire libqalculate power-profiles-daemon
     ttf-material-symbols-variable ttf-rubik-vf ttf-cascadia-code-nerd
-    qt6-m3shapes-git swappy bash cmake ninja qt6-shadertools
+    qt6-m3shapes-git swappy bash cmake ninja qt6-shadertools python-virtualenv
     "$AUR_HELPER_PACKAGE"
 )
 if ! run_progress 'Installing packages from the offline repository' \
