@@ -334,7 +334,7 @@ PACSTRAP_PACKAGES=(
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting
     arch-install-scripts xorg-xwayland firefox foot polkit-gnome
     xdg-desktop-portal xdg-desktop-portal-hyprland gum make figlet qt5ct qt6ct
-    chromium liquidctl quickshell glibc gcc-libs ddcutil brightnessctl libcava
+    chromium liquidctl quickshell-git glibc gcc-libs ddcutil brightnessctl libcava
     lm_sensors aubio libpipewire libqalculate power-profiles-daemon
     ttf-material-symbols-variable ttf-rubik-vf ttf-cascadia-code-nerd
     qt6-m3shapes-git swappy bash cmake ninja qt6-shadertools
