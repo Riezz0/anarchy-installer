@@ -75,6 +75,7 @@ def relaunch_as_desktop_user() -> None:
 
 relaunch_as_desktop_user()
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -253,10 +254,14 @@ class OfflineInstaller(Gtk.Application):
         self.chaotic_check: Gtk.CheckButton | None = None
         self.review_label: Gtk.Label | None = None
         self.log_buffer: Gtk.TextBuffer | None = None
+        self.log_view: Gtk.TextView | None = None
+        self.log_scroll: Gtk.ScrolledWindow | None = None
         self.progress_label: Gtk.Label | None = None
         self.activity_label: Gtk.Label | None = None
         self.progress_bar: Gtk.ProgressBar | None = None
         self.log_expander: Gtk.Expander | None = None
+        self.brand_accent = FALLBACK_PYWAL["color4"]
+        self.brand_foreground = FALLBACK_PYWAL["foreground"]
         self.phase_rows: list[tuple[Gtk.Box, Gtk.Label, Gtk.Label]] = []
         self.current_phase = 0
         self.config_path: Path | None = None
@@ -288,12 +293,14 @@ class OfflineInstaller(Gtk.Application):
         accent_text = contrasting_text(wal["color4"], foreground, background)
         success_text = contrasting_text(wal["color2"], foreground, background)
         danger_text = contrasting_text(wal["color1"], foreground, background)
+        self.brand_accent = wal["color4"]
+        self.brand_foreground = foreground
         provider = Gtk.CssProvider()
         css = f"""
             window {{ background-color: {background}; color: {foreground}; }}
             .app-shell {{ background-color: {background}; }}
             .topbar {{ background-color: {panel}; border-bottom: 1px solid {border}; padding: 18px 26px; }}
-            .brand-mark {{ background-color: {panel_alt}; border-radius: 14px; color: {wal['color5']}; padding: 11px; font-size: 20px; font-weight: 800; }}
+            .brand-logo {{ background-color: {panel_alt}; border-radius: 14px; }}
             .brand-title {{ color: {foreground}; font-size: 19px; font-weight: 750; }}
             .brand-subtitle, .muted {{ color: {muted}; }}
             .content {{ padding: 28px; }}
@@ -367,7 +374,7 @@ class OfflineInstaller(Gtk.Application):
         return row
 
     def _build_window(self) -> None:
-        self.window = Gtk.ApplicationWindow(application=self, title="Anarchy Offline Installer")
+        self.window = Gtk.ApplicationWindow(application=self, title="Anarchy-Linux Installer")
         self.window.set_default_size(1020, 740)
         self.window.set_size_request(780, 620)
         self.window.connect("close-request", self._on_close_request)
@@ -401,15 +408,46 @@ class OfflineInstaller(Gtk.Application):
         self.window.set_child(shell)
         self._show_page(0)
 
+    def _brand_logo(self) -> Gtk.Widget:
+        """Draw the two-tone Anarchy-Shell mark used across the desktop."""
+        logo = Gtk.DrawingArea()
+        logo.add_css_class("brand-logo")
+        logo.set_size_request(46, 46)
+        accent = Gdk.RGBA()
+        if not accent.parse(self.brand_accent):
+            accent.parse(FALLBACK_PYWAL["color4"])
+        foreground = Gdk.RGBA()
+        if not foreground.parse(self.brand_foreground):
+            foreground.parse(FALLBACK_PYWAL["foreground"])
+        left_half = ((12.0, 2.0), (3.0, 21.0), (8.0, 21.0), (12.0, 11.0))
+        right_half = ((12.0, 2.0), (12.0, 11.0), (16.0, 21.0), (21.0, 21.0))
+
+        def draw(_area: Gtk.DrawingArea, cr: cairo.Context, width: int, height: int) -> None:
+            def fill(colour: Gdk.RGBA, points: tuple[tuple[float, float], ...]) -> None:
+                cr.set_source_rgba(colour.red, colour.green, colour.blue, colour.alpha)
+                cr.move_to(*points[0])
+                for x, y in points[1:]:
+                    cr.line_to(x, y)
+                cr.close_path()
+                cr.fill()
+
+            scale = min(width, height) / 24
+            cr.save()
+            cr.translate((width - 24 * scale) / 2, (height - 24 * scale) / 2)
+            cr.scale(scale, scale)
+            fill(accent, left_half)
+            fill(foreground, right_half)
+            cr.restore()
+
+        logo.set_draw_func(draw)
+        return logo
+
     def _build_header(self) -> Gtk.Widget:
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=13)
         header.add_css_class("topbar")
-        mark = self._label("A", "brand-mark")
-        mark.set_xalign(0.5)
-        mark.set_yalign(0.5)
-        header.append(mark)
+        header.append(self._brand_logo())
         brand = self._vbox(2)
-        brand.append(self._label("ANARCHY  /  OFFLINE SETUP", "brand-title"))
+        brand.append(self._label("Anarchy-Linux Installer", "brand-title"))
         brand.append(self._label("A guided installation for your system", "brand-subtitle"))
         header.append(brand)
         spacer = Gtk.Box()
@@ -624,10 +662,13 @@ class OfflineInstaller(Gtk.Application):
         text_view.set_monospace(True)
         text_view.add_css_class("log-view")
         self.log_buffer = text_view.get_buffer()
+        self.log_view = text_view
+        self.log_scroll = scroll
         scroll.set_child(text_view)
         self.log_expander = Gtk.Expander(label="Show detailed output")
         self.log_expander.set_expanded(False)
         self.log_expander.set_child(scroll)
+        self.log_expander.connect("notify::expanded", self._on_log_expanded)
         page.append(self.log_expander)
         self._update_phase(0, "Preparing the target drive…")
         return page
@@ -932,12 +973,37 @@ class OfflineInstaller(Gtk.Application):
                 self._update_phase(3, title)
             return GLib.SOURCE_REMOVE
         if self.log_buffer is not None:
+            at_bottom = self._log_is_at_bottom()
             end = self.log_buffer.get_end_iter()
             self.log_buffer.insert(end, line + "\n")
+            if at_bottom:
+                GLib.idle_add(self._scroll_log_to_end)
         if self.activity_label and re.search(r"(error|failed|fatal):", line, re.IGNORECASE):
             self.activity_label.set_text("An issue was reported. Open detailed output for the full message.")
             self.activity_label.add_css_class("warning-text")
         return GLib.SOURCE_REMOVE
+
+    def _log_is_at_bottom(self) -> bool:
+        """Return True when the output view is following the end of the log."""
+        if self.log_scroll is None:
+            return True
+        adjustment = self.log_scroll.get_vadjustment()
+        if adjustment is None:
+            return True
+        upper = adjustment.get_upper()
+        page_size = adjustment.get_page_size()
+        return adjustment.get_value() >= upper - page_size - 4
+
+    def _scroll_log_to_end(self) -> bool:
+        if self.log_view is None or self.log_buffer is None:
+            return GLib.SOURCE_REMOVE
+        end = self.log_buffer.get_end_iter()
+        self.log_view.scroll_to_iter(end, 0.0, True, 0.0, 1.0)
+        return GLib.SOURCE_REMOVE
+
+    def _on_log_expanded(self, expander: Gtk.Expander, _pspec: object) -> None:
+        if expander.get_expanded():
+            GLib.idle_add(self._scroll_log_to_end)
 
     def _update_phase(self, phase: int, activity: str) -> None:
         """Update the high-level install checklist and progress indicator."""
@@ -1023,6 +1089,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    GLib.set_application_name("Anarchy-Linux Installer")
     app = OfflineInstaller()
     return app.run(None)
 
