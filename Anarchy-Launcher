@@ -3,4 +3,4 @@
 kitty --class "HyprMon" hyprmon
 wait
 
-kitty --class "Anarchy-Installer" sudo /usr/local/bin/Anarchy-Installer
+kitty --class "Anarchy-Installer" sudo /usr/local/bin/Anarchy-Installer-Offline-GUI
