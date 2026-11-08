@@ -331,8 +331,10 @@ if ! run_progress 'Installing packages from the offline repository' \
     wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
     arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa \
     xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet qt5ct qt6ct \
-    chromium liquidctl libqalculate cava aubio brightnessctl power-profiles-daemon fish \
-    gcc ddcutil swappy qt6-imageformats lm_sensors pipewire wl-clipboard quickshell \
+    chromium liquidctl quickshell-git glibc gcc-libs ddcutil brightnessctl libcava networkmanager \ 
+    lm_sensors aubio libpipewire libqalculate power-profiles-daemon ttf-material-symbols-variable \ 
+    ttf-rubik-vf ttf-cascadia-code-nerd qt6-base qt6-declarative qt6-imageformats qt6-multimedia \ 
+    qt6-m3shapes-git swappy bash cmake ninja qt6-shadertools \
     "$AUR_HELPER_PACKAGE"; then
     fail 'Offline package installation failed. See the output above.'
     exit 1
