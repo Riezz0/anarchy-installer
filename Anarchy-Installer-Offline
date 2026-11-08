@@ -311,31 +311,37 @@ EOF
 ok 'Offline repository configuration written'
 
 # --- PACSTRAP SEQUENCE ---
+# Keep this in an explicit array: a broken line continuation inside a command
+# would silently turn the remaining words into separate commands and hide the
+# real pacstrap failure.
+PACSTRAP_PACKAGES=(
+    base linux-zen linux-zen-headers linux-firmware linux-firmware-amdgpu btrfs-progs grub
+    efibootmgr networkmanager nano sudo git
+    "${NCT_BUILD_PACKAGES[@]}"
+    sddm uwsm hyprland kitty rofi mesa pipewire pipewire-audio wireplumber stow zsh
+    vulkan-radeon lib32-mesa lib32-vulkan-radeon
+    terminus-font gptfdisk e2fsprogs dosfstools adw-gtk-theme otf-font-awesome wlsunset
+    awww blueman bluez bluez-utils coolercontrol coolercontrold eza fastfetch hypridle hyprlock
+    hyprpicker hyprsunset mesa-utils nautilus neovim npm nwg-look python-gobject
+    qt5-graphicaleffects qt5-imageformats qt5-multimedia qt5-quickcontrols2 qt5-quickcontrols qt5-svg
+    qt6-5compat qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg
+    ttf-jetbrains-mono-nerd vlc vlc-plugins-all xdg-terminal-exec yt-dlp zsh-autocomplete
+    zsh-autosuggestions zsh-syntax-highlighting wl-clipboard arch-update goverlay-git
+    gradience-git grim-git gtk2 hyprmon-bin hyprscratch kvantum-qt6-git nautilus-admin-gtk4
+    nautilus-open-any-terminal-git oh-my-zsh-git python-anyascii python-cssutils python-encutils
+    python-libsass python-material-color-utilities python-pywal16 python-pywalfox python-yapsy-git
+    qt5-styleplugins slurp-git vesktop-bin ttf-font-awesome-4 ttf-font-awesome-5 vkbasalt
+    wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting
+    arch-install-scripts xorg-xwayland firefox foot polkit-gnome
+    xdg-desktop-portal xdg-desktop-portal-hyprland gum make figlet qt5ct qt6ct
+    chromium liquidctl quickshell glibc gcc-libs ddcutil brightnessctl libcava
+    lm_sensors aubio libpipewire libqalculate power-profiles-daemon
+    ttf-material-symbols-variable ttf-rubik-vf ttf-cascadia-code-nerd
+    qt6-m3shapes-git swappy bash cmake ninja qt6-shadertools
+    "$AUR_HELPER_PACKAGE"
+)
 if ! run_progress 'Installing packages from the offline repository' \
-    pacstrap -C "$PACMAN_CONF_FILE" -K /mnt \
-    base linux-zen linux-zen-headers linux-firmware linux-firmware-amdgpu btrfs-progs grub efibootmgr networkmanager nano sudo git \
-    "${NCT_BUILD_PACKAGES[@]}" \
-    sddm uwsm hyprland kitty rofi mesa pipewire pipewire-audio wireplumber stow zsh \
-    vulkan-radeon lib32-mesa lib32-vulkan-radeon \
-    terminus-font gptfdisk e2fsprogs dosfstools adw-gtk-theme otf-font-awesome wlsunset \
-    awww blueman bluez bluez-utils coolercontrol coolercontrold eza fastfetch hypridle hyprlock \
-    hyprpicker hyprsunset mesa-utils nautilus neovim npm nwg-look python-gobject \
-    qt5-graphicaleffects qt5-imageformats qt5-multimedia qt5-quickcontrols2 qt5-quickcontrols qt5-svg \
-    qt6-5compat qt6-base qt6-declarative qt6-imageformats qt6-multimedia qt6-svg \
-    ttf-jetbrains-mono-nerd vlc vlc-plugins-all xdg-terminal-exec yt-dlp zsh-autocomplete \
-    zsh-autosuggestions zsh-syntax-highlighting wl-clipboard arch-update goverlay-git \
-    gradience-git grim-git gtk2 hyprmon-bin hyprscratch kvantum-qt6-git nautilus-admin-gtk4 \
-    nautilus-open-any-terminal-git oh-my-zsh-git python-anyascii python-cssutils python-encutils \
-    python-libsass python-material-color-utilities python-pywal16 python-pywalfox python-yapsy-git \
-    qt5-styleplugins slurp-git vesktop-bin ttf-font-awesome-4 ttf-font-awesome-5 vkbasalt \
-    wf-recorder-git xfce-polkit zsh-autoswitch-virtualenv-git zsh-fast-syntax-highlighting \
-    arch-install-scripts xorg-xwayland firefox foot polkit-gnome vulkan-radeon lib32-mesa \
-    xdg-desktop-portal xdg-desktop-portal-hyprland gum make lib32-vulkan-radeon figlet qt5ct qt6ct \
-    chromium liquidctl quickshell-git glibc gcc-libs ddcutil brightnessctl libcava networkmanager \ 
-    lm_sensors aubio libpipewire libqalculate power-profiles-daemon ttf-material-symbols-variable \ 
-    ttf-rubik-vf ttf-cascadia-code-nerd qt6-base qt6-declarative qt6-imageformats qt6-multimedia \ 
-    qt6-m3shapes-git swappy bash cmake ninja qt6-shadertools \
-    "$AUR_HELPER_PACKAGE"; then
+    pacstrap -C "$PACMAN_CONF_FILE" -K /mnt "${PACSTRAP_PACKAGES[@]}"; then
     fail 'Offline package installation failed. See the output above.'
     exit 1
 fi
